@@ -40,11 +40,36 @@ As nodes move within the network, their positions change periodically, affecting
 
 To maintain connectivity in a Wi-Fi environment, 802.11 management frames include for example:
 
-- **Beacon Frame**: Broadcast periodically by the access point (AP) to announce the Wi-Fi network (`ns-3-ssid`). The mobile node detects these beacons to recognize when it is within the AP’s range.
-- **Association Request and Response**: When the mobile node comes within range, it sends an association request to join the network, and the AP responds with an association response, granting access. These exchanges may repeat as the mobile node reconnects upon moving back within range.
-- **Acknowledgment**: Acknowledgment frames confirm the receipt of management frames.
+- **Beacon Frames**: Broadcast periodically by the AP to announce the network SSID (`ns-3-ssid`). These frames allow the mobile node to detect when it is within the AP's range, enabling it to initiate a connection.
+ ![Beacon Frame Details](lab5/screenshots/beacon_frame.png)
+
+- **Association Requests and Responses**: When the mobile node detects the AP, it sends an association request to join the network. The AP responds with an association response, granting access. The presence of repeated association frames suggests that the mobile node frequently reconnects, likely due to movement in and out of the AP’s range.
+- **Acknowledgment Frames**: These frames confirm the receipt of other frames, such as association requests, ensuring reliable communication between the AP and the mobile node.
+- **Malformed Packets**: Some packets appear as malformed with the label "Unknown protocol version: 2." These could result from disruptions in connectivity or simulation artifacts, potentially caused by the mobile node’s movement, which may interfere with consistent packet construction.
+
+This behavior illustrates the impact of mobility on connectivity, as the mobile node relies on these management frames to reconnect whenever it moves back into the network's coverage area.
+
 
 This process enables the mobile node to maintain a connection to the Wi-Fi network even as it moves, though repeated association requests and responses may signal mobility-related disconnections.
+
+
+### 2.2 Mobility Events, Position Updates, and 802.11 Management Frames
+
+As nodes move within the network, their positions change periodically, affecting network connectivity and packet transmission. These movements are logged in the simulation and observed in Wireshark as fluctuations in packet timing and intervals. The mobile node (`10.1.3.3`) communicates with other nodes, and its movement introduces variation in packet intervals, reflecting connectivity challenges due to node mobility.
+
+To maintain connectivity in a Wi-Fi environment, 802.11 management frames include:
+
+- **Beacon Frames**
+- **Association Requests and Responses**
+- **Acknowledgment Frames**
+- **Malformed Packets**
+
+These frames illustrate the impact of mobility on connectivity, as the mobile node relies on them to reconnect whenever it moves back into the network's coverage area.
+
+The screenshot below shows the captured 802.11 management frames, including beacon frames, association requests and responses, acknowledgment frames, and malformed packets.
+
+![802.11 Management Frames](lab5/screenshots/screen_1-0.png)
+
 
 #### Code Snippet
 ```cpp
@@ -61,41 +86,3 @@ mobility.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
 mobility.Install(wifiStaNodes);
 ```
 
-The screenshot below captures a beacon frame, an association request, and an association response. We cans see the `ssid` is broadcasted which can be used to identify the network  
-  ![802.11 Management Frames](lab5/screenshots/screen_1-0.png)
-
-
-### 2.3. Packet Queue Management
-Queue length changes were observed and captured, showing congestion levels in network queues. When the queue length increases, packets may be held or dropped, depending on the network’s traffic load.
-- **Packet Explanation**: These packets reflect the queue's state when managing traffic; a high queue length might lead to packet delays or drops, which can be confirmed by packet retransmissions in Wireshark.
-- **Screenshot Placeholder**: 
-  ![Queue Length Change Packet](screenshot_queue_length_change.png)
-
-### 2.4. Packet Drops
-During high congestion, packets are occasionally dropped from the queue. Wireshark captures these events with details on the specific times and packets affected.
-- **Packet Explanation**: Packet drops indicate network congestion. Dropped packets typically require retransmission, affecting overall latency and throughput.
-- **Screenshot Placeholder**: 
-  ![Packet Drop Event](screenshot_packet_drop.png)
-
-### 2.5. Client-Server Data Exchange
-The simulation logs capture packets sent from the client and received by the server, with corresponding acknowledgments. Each packet sent and received in the data exchange can be correlated to a time event in the simulation logs.
-- **Packet Explanation**: This section illustrates successful communication between the client and server, indicating stable connectivity. Each data packet exchange signifies the correct functioning of the UDP echo application.
-- **Screenshot Placeholder**: 
-  ![Client-Server Packet Exchange](screenshot_client_server_exchange.png)
-
-## 3. Conclusion
-The `.pcap` analysis shows how network parameters like mobility, queue size, and congestion levels impact data flow and packet integrity in a wireless network environment. The events logged in the simulation, such as queue length changes, packet drops, and position updates, correlate well with the packet traces observed in Wireshark.
-
-By examining the captured packets, we see the effects of node movement, congestion, and queue management on data transmission, which are critical factors in real-world network performance.
-
----
-
-## Appendices
-### Appendix A: Full Wireshark Capture Screenshots
-- **Screenshot of Initial UDP Handshake**
-- **Screenshot of Mobility Event**
-- **Screenshot of Queue Length Change**
-- **Screenshot of Packet Drop Event**
-- **Screenshot of Client-Server Packet Exchange**
-
-Each section above should include a Wireshark screenshot showing the packets involved in the respective events.
