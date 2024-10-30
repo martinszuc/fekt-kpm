@@ -1,7 +1,8 @@
 # Simulation Output and Explanation
 
 ```bash
-$ NS_LOG="FirstScript=level_all" ./ns3 run scratch/first.cc > log_output.txt
+$ NS_LOG="FirstScript=level_all" ./ns3 run scratch/first.cc > log_output.txt 2>&1
+
 FirstScript:main()
 Time resolution set to nanoseconds
 Logging enabled for UdpEcho applications
