@@ -16,8 +16,6 @@ The UDP Echo Client initiates communication with the Echo Server on port 9. This
 - **Destination IP**: `10.1.2.4` (UDP Echo Server)
 - **Source Port**: An ephemeral port (`49153`), dynamically assigned by the client
 - **Destination Port**: Port `9`, specified in the server setup
-- **UDP Length**: The total packet size, including headers and payload, is 1024 bytes as configured in the `queue.cc` simulation file
-- **Checksum**: The checksum field verifies data integrity, though in this instance, it shows `0x0000`, meaning it was not calculated (UDP checksum is optional)
 
 This packet marks the start of data flow between the client and server, indicating that the network and applications are correctly configured to communicate.
 
@@ -40,11 +38,11 @@ The screenshot below shows the initial UDP handshake packet between the client a
 
 As nodes move within the network, their positions change periodically, affecting network connectivity and packet transmission. These movements are logged in the simulation and observed in Wireshark as fluctuations in packet timing and intervals. The mobile node (`10.1.3.3`) communicates with other nodes, and its movement introduces variation in packet intervals, reflecting connectivity challenges due to node mobility.
 
-To maintain connectivity in a Wi-Fi environment, 802.11 management frames are essential. These frames include:
+To maintain connectivity in a Wi-Fi environment, 802.11 management frames include for example:
 
 - **Beacon Frame**: Broadcast periodically by the access point (AP) to announce the Wi-Fi network (`ns-3-ssid`). The mobile node detects these beacons to recognize when it is within the AP’s range.
-- **Association Request and Response**: When the mobile node comes within range, it sends an association request to join the network, and the AP responds with an association response, granting access. These association exchanges may repeat as the mobile node reconnects upon moving back within range.
-- **Acknowledgment**: Acknowledgment frames confirm the receipt of management frames, helping maintain reliable communication as the node’s connectivity fluctuates with its movement.
+- **Association Request and Response**: When the mobile node comes within range, it sends an association request to join the network, and the AP responds with an association response, granting access. These exchanges may repeat as the mobile node reconnects upon moving back within range.
+- **Acknowledgment**: Acknowledgment frames confirm the receipt of management frames.
 
 This process enables the mobile node to maintain a connection to the Wi-Fi network even as it moves, though repeated association requests and responses may signal mobility-related disconnections.
 
@@ -63,9 +61,8 @@ mobility.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
 mobility.Install(wifiStaNodes);
 ```
 
-The screenshot below captures a beacon frame, an association request, and an association response, illustrating the Wi-Fi connectivity process for the mobile node.
-
-![802.11 Management Frames](lab5/screenshots/screen_1_0.png)
+The screenshot below captures a beacon frame, an association request, and an association response. We cans see the `ssid` is broadcasted which can be used to identify the network  
+  ![802.11 Management Frames](lab5/screenshots/screen_1-0.png)
 
 
 ### 2.3. Packet Queue Management
