@@ -7,7 +7,7 @@ Or complete file `first.cc` [Complete first.cc file](https://github.com/martinsz
 # Simulation Output and Explanation
 
 ```bash
-$ NS_LOG="FirstScript=level_all" ./ns3 run scratch/first.cc > log_output.txt 2>&1
+$ NS_LOG="FirstScriptExample=level_all" ./ns3 run scratch/first.cc > log_output.txt 2>&1
 
 FirstScript:main()
 Time resolution set to nanoseconds
