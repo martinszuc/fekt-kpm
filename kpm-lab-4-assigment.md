@@ -1,5 +1,7 @@
 # Simulation Output and Explanation
 
+Edited code for `first.cc` with changes can be seen and compared here: https://github.com/martinszuc/fekt-kpm/commit/18ffa2eb04e983a6a2e7c7d973411b5e0d77bb03
+
 ```bash
 $ NS_LOG="FirstScript=level_all" ./ns3 run scratch/first.cc > log_output.txt 2>&1
 
