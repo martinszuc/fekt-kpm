@@ -1,7 +1,7 @@
 # Code
-Edited code for `first.cc` with changes can be seen and compared here: [Compare changes for `first.cc` on GitHub](https://github.com/martinszuc/fekt-kpm/commit/18ffa2eb04e983a6a2e7c7d973411b5e0d77bb03)
+Edited code for `first.cc` with changes can be seen and compared here: [Compare changes for `first.cc` on GitHub](https://github.com/martinszuc/fekt-kpm/commit/172104372e50b587f524b6568307a09059f8ba57)
 
-Or complete file `first.cc` [Complete first.cc file](https://github.com/martinszuc/fekt-kpm/blob/main/ns-3.39/scratch/first.cc)
+Or complete file `first.cc` [Complete first.cc file](https://github.com/martinszuc/fekt-kpm/blob/main/lab4/first.cc)
 
 
 # Simulation Output and Explanation
