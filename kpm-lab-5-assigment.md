@@ -41,7 +41,7 @@ As nodes move within the network, their positions change periodically, affecting
 To maintain connectivity in a Wi-Fi environment, 802.11 management frames include for example:
 
 - **Beacon Frames**: Broadcast periodically by the AP to announce the network SSID (`ns-3-ssid`). These frames allow the mobile node to detect when it is within the AP's range, enabling it to initiate a connection.
- ![Beacon Frame Details](lab5/screenshots/beacon_frame.png)
+ ![Beacon Frame Details](lab5/screenshots/screen_beacon_frame.png)
 
 - **Association Requests and Responses**: When the mobile node detects the AP, it sends an association request to join the network. The AP responds with an association response, granting access. The presence of repeated association frames suggests that the mobile node frequently reconnects, likely due to movement in and out of the AP’s range.
 - **Acknowledgment Frames**: These frames confirm the receipt of other frames, such as association requests, ensuring reliable communication between the AP and the mobile node.
