@@ -1,11 +1,10 @@
 # Laboratory 5: Analysis of Wireshark Network Activity Traces
 
-## 1. Network Setup and Key Simulation Events
-The simulation setup consists of:
-- **Point-to-Point (P2P)** connection between two nodes with specific data rate and delay attributes.
-- **CSMA and Wi-Fi Networks** connected to various nodes.
-- **UDP Echo Server and Client** configured to send and receive packets with defined intervals.
-
+## 1. Network Setup
+- **Point-to-Point (P2P) Link**: A dedicated link between two primary nodes. This link is configured to use a queue management mechanism to control packet flow and mitigate congestion.
+- **CSMA Network**: A shared Ethernet-like network with several nodes connected via a CSMA channel, emulating a typical wired local network.
+- **Wi-Fi Network**: A wireless segment consisting of a Wi-Fi access point (AP) and several mobile Wi-Fi stations (nodes). The AP periodically broadcasts beacon frames to announce its presence, allowing mobile nodes to associate and re-associate as they move within range. Mobility models are applied to simulate node movement, testing the impact of mobility on connectivity and packet flow.
+- **UDP Echo Server and Client**: A UDP Echo Server is installed on one of the CSMA nodes, while a UDP Echo Client is configured on a mobile Wi-Fi node. The client periodically sends UDP packets to the server at defined intervals, allowing observations of packets
 ## 2. Analysis
 
 ### 2.1 Initial UDP Handshake and Packet Exchanges
