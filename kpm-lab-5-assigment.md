@@ -33,26 +33,6 @@ echoClient.SetAttribute("PacketSize", UintegerValue(1024));
 The screenshot below shows the initial UDP handshake packet between the client and server on port 9, demonstrating the start of the communication process.
   ![UDP handshake](/lab5/screenshots/screen_0-0.png)
 
-
-### 2.2 Mobility Events, Position Updates, and 802.11 Management Frames
-
-As nodes move within the network, their positions change periodically, affecting network connectivity and packet transmission. These movements are logged in the simulation and observed in Wireshark as fluctuations in packet timing and intervals. The mobile node (`10.1.3.3`) communicates with other nodes, and its movement introduces variation in packet intervals, reflecting connectivity challenges due to node mobility.
-
-To maintain connectivity in a Wi-Fi environment, 802.11 management frames include for example:
-
-- **Beacon Frames**: Broadcast periodically by the AP to announce the network SSID (`ns-3-ssid`). These frames allow the mobile node to detect when it is within the AP's range, enabling it to initiate a connection.
- ![Beacon Frame Details](lab5/screenshots/screen_beacon_frame.png)
-
-- **Association Requests and Responses**: When the mobile node detects the AP, it sends an association request to join the network. The AP responds with an association response, granting access. The presence of repeated association frames suggests that the mobile node frequently reconnects, likely due to movement in and out of the AP’s range.
-- **Acknowledgment Frames**: These frames confirm the receipt of other frames, such as association requests, ensuring reliable communication between the AP and the mobile node.
-- **Malformed Packets**: Some packets appear as malformed with the label "Unknown protocol version: 2." These could result from disruptions in connectivity or simulation artifacts, potentially caused by the mobile node’s movement, which may interfere with consistent packet construction.
-
-This behavior illustrates the impact of mobility on connectivity, as the mobile node relies on these management frames to reconnect whenever it moves back into the network's coverage area.
-
-
-This process enables the mobile node to maintain a connection to the Wi-Fi network even as it moves, though repeated association requests and responses may signal mobility-related disconnections.
-
-
 ### 2.2 Mobility Events, Position Updates, and 802.11 Management Frames
 
 As nodes move within the network, their positions change periodically, affecting network connectivity and packet transmission. These movements are logged in the simulation and observed in Wireshark as fluctuations in packet timing and intervals. The mobile node (`10.1.3.3`) communicates with other nodes, and its movement introduces variation in packet intervals, reflecting connectivity challenges due to node mobility.
@@ -60,29 +40,30 @@ As nodes move within the network, their positions change periodically, affecting
 To maintain connectivity in a Wi-Fi environment, 802.11 management frames include:
 
 - **Beacon Frames**
+  - ![Beacon Frame Details](lab5/screenshots/screen_beacon_frame.png)
+  - ***SSID***: `ns-3-ssid` – Identifies the network, allowing the mobile node to recognize it.
+  - ***Beacon Interval***: 0.102400 seconds – Frequency of beacon broadcasts
+  - ***Supported Rates***: 6, 9, 12, 18, 24, 36, 48, 54 Mbps – Available data rates for optimizing connection speed.
+  - ***Capabilities***: HE, VHT, HT – Support for advanced Wi-Fi standards.
 - **Association Requests and Responses**
+  - ![Beacon Frame Details](lab5/screenshots/screen_respose_success.png)
+  - ***Status Code***: Successful (0x0000) – Confirms the mobile node is allowed to join the network.
+  - ***Association ID***: 0x0001 – Unique identifier assigned to the mobile node.
+  - ***Supported Rates***: 6 to 54 Mbps – Data rates available for optimized communication.
+  - ***Capabilities***: HE, VHT, HT – Support for advanced Wi-Fi standards.
 - **Acknowledgment Frames**
 - **Malformed Packets**
+  - Malformed packets in this simulation could occur due to network mobility and connectivity disruptions
+- **ARP requests**
+  - ![ARP Screen](lab5/screenshots/screen_arp.png)
+  - are used to map IP addresses to MAC addresses within the network. ARP request is broadcast to all nodes on the network, asking for the MAC address of the target IP address.
+  - **Sender IP Address**: `10.1.3.3` (mobile node)
+  - **Target IP Address**: `10.1.3.4`
+  - **Broadcast MAC Address**: `ff:ff:ff:ff:ff:ff` (indicating that all nodes on the network should receive and process the request)
+
 
 These frames illustrate the impact of mobility on connectivity, as the mobile node relies on them to reconnect whenever it moves back into the network's coverage area.
 
 The screenshot below shows the captured 802.11 management frames, including beacon frames, association requests and responses, acknowledgment frames, and malformed packets.
 
 ![802.11 Management Frames](lab5/screenshots/screen_1-0.png)
-
-
-#### Code Snippet
-```cpp
-mobility.SetPositionAllocator("ns3::GridPositionAllocator",
-                              "MinX", DoubleValue(0.0),
-                              "MinY", DoubleValue(0.0),
-                              "DeltaX", DoubleValue(5.0),
-                              "DeltaY", DoubleValue(10.0),
-                              "GridWidth", UintegerValue(3),
-                              "LayoutType", StringValue("RowFirst"));
-
-mobility.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
-                          "Bounds", RectangleValue(Rectangle(-50, 50, -50, 50)));
-mobility.Install(wifiStaNodes);
-```
-
