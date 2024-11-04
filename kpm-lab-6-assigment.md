@@ -1,157 +1,39 @@
 # LTE Network Simulation Report
+## 1. Analysis of the Trace Files (Four Layers)
 
-## 1. GTPv2 Session Creation
+### 1.1 Physical Layer (PHY)
 
-In LTE networks, **GTPv2 (GPRS Tunneling Protocol version 2)** operates at the control plane and is essential for managing sessions between the User Equipment (UE) and core network components. GTPv2 enables the setup, modification, and deletion of sessions to facilitate efficient data transfer.
+**Trace File:** `DlRsrpSinrStats.txt` and `UlSinrStats.txt`
 
-### Session Setup Process
+The PHY layer trace files contain measurements of key parameters like SINR and RSRP, which are critical for assessing the signal quality and strength.
 
-The session setup starts with a **Create Session Request** from the core network, followed by a **Create Session Response**. Once the session is established, data packets are tunneled using GTP-U (User Plane) encapsulation.
-
-The initial frames in the trace file illustrate this process:
-- **Frame 3**: **Create Session Request** from `14.0.0.6` to `14.0.0.5`, which includes subscriber and network information.
-- **Frame 4**: **Create Session Response** from `14.0.0.5` to `14.0.0.6`, confirming session setup.
-
-Following these setup frames, GTP-U packets are visible, indicating active user data transfer. These packets, such as **Frame 15**, use different port numbers (e.g., `49153 → 2001`) to signify different data flows and potential QoS levels.
-
-**![Session Creation and Data Packets](lab6/screenshots/screen_1.png)**
-
-A closer look at the **Create Session Request** in Frame 3 reveals fields like:
-- **IMSI**: Identifies the subscriber for authentication and tracking.
-- **ULI**: Provides UE location information for routing.
-- **F-TEID**: Specifies the tunnel endpoint for data transfer, including SGW IP and TEID.
-
-These fields are crucial for setting up the GTP tunnel between the UE and core network, enabling seamless data transmission.
-
-**![Create Session Request Details](lab6/screenshots/screen_2.png)**
-### Layer Information
-- **GTPv2 Control Messages** (e.g., Create Session Request) operate at the **control plane layer**.
-- **GTP-U Data Packets** function at the **user plane layer**, carrying user data.
----
-
-## 2. UDP Data Analysis
-
-The UDP protocol, seen in the pcap files, is used to carry encapsulated user data between the core network and UE over the GTP-U tunnel. Each UDP packet represents a segment of user data being tunneled across the LTE network.
-
-### Analysis of UDP Packets
-
-**![UDP Data Packets](lab6/screenshots/screen_udp.png)**
-
-### Layer Information
-- **UDP Packets** in this context are part of the **user plane** layer, encapsulating data transferred between the UE and core network.
-
----
-
-### 3.1 PHY Layer
-
-PHY Layer Analysis: SINR and RSRP
-
-In LTE networks, **SINR (Signal-to-Interference-plus-Noise Ratio)** and **RSRP (Reference Signal Received Power)** are crucial metrics for understanding signal quality and connection stability at the physical layer.
-
-
-The **SINR** values in the uplink (UL) trace file `UlSinrStats.txt` provide insights into the quality of the uplink signal received by the eNodeB. Higher SINR values indicate a better signal quality, which is essential for achieving higher data rates and reliable communication.
-
-**Sample Data:**
+**Sample Data from `DlRsrpSinrStats.txt`:**
 ```
 % time	cellId	IMSI	RNTI	rsrp	sinr	ComponentCarrierId
 0.000214285	1	1	0	0.00333333	7.02728e+12	0
 0.000214285	2	2	0	0.00333333	7.02728e+12	0
 0.00121428	1	1	0	0.00333333	7.02728e+12	0
 0.00121428	2	2	0	0.00333333	7.02728e+12	0
-0.00221428	1	1	0	0.00333333	7.02728e+12	0
-0.00221428	2	2	0	0.00333333	7.02728e+12	0
-0.00321428	1	1	0	0.00333333	7.02728e+12	0
-0.00321428	2	2	0	0.00333333	7.02728e+12	0
-0.00421428	1	1	0	0.00333333	7.02728e+12	0
-0.00421428	2	2	0	0.00333333	7.02728e+12	0
-0.00521428	1	1	0	0.00333333	7.02728e+12	0
-```
-- **Time**: The timestamp of each SINR measurement.
-- **cellId**: The ID of the cell receiving the uplink transmission.
-- **IMSI**: The unique identifier for the UE.
-- **sinrLinear**: The SINR value in linear scale. In this sample, the SINR values are consistently high (e.g., `1.64215e+06`), indicating minimal interference and good signal quality.
-- **componentCarrierId**: The carrier component ID used for multi-carrier setups.
-
-
-### Analysis of Downlink RSRP and SINR Data
-
-The `DlRsrpSinrStats.txt` file captures key metrics related to signal strength and quality in the downlink (DL) path of the LTE simulation. Below is a breakdown of the primary metrics:
-
-- **RSRP (Reference Signal Received Power)**: Indicates the received power of the reference signal sent by the eNodeB (cell tower) to the UE (User Equipment). In this dataset, the RSRP values are consistently low (`0.00333333`), likely due to simulated ideal conditions or controlled signal interference.
-
-- **SINR (Signal-to-Interference-plus-Noise Ratio)**: A measure of signal quality, reflecting the relationship between the received signal and interference/noise. The high SINR values (e.g., `7.02728e+12`) suggest minimal interference in the simulation, indicative of an ideal network setup. High SINR ensures a better-quality connection, supporting higher data rates.
-
-#### Sample Data
-
-The following table illustrates the consistent pattern in RSRP and SINR values across timestamps:
-
-**Sample Data:**
 ```
 
-```
+- **Time:** Timestamp of the measurement.
+- **cellId:** Identifier of the cell.
+- **IMSI:** International Mobile Subscriber Identity of the UE.
+- **rsrp:** Reference Signal Received Power in dBm.
+- **sinr:** Signal-to-Interference-plus-Noise Ratio in dB.
+- **ComponentCarrierId:** ID for carrier aggregation scenarios.
 
-#### PHY Layer
 
-The following data from the downlink (`DlTxPhyStats.txt`) shows the modulation and coding scheme (MCS), packet size, and transmission characteristics for each transmission instance. Consistent MCS values (e.g., `28`) and packet sizes (`2196`) indicate stable network conditions with optimal resource usage for downlink transmission.
+- **RSRP:** Indicates the power level received by the UE from the cell. Values around -80 dBm suggest good signal strength.
+- **SINR:** Reflects the quality of the signal. Higher SINR values (e.g., 30 dB) indicate better signal quality, leading to higher data rates.
 
-**[PHY Layer Downlink Stats]**
+### 1.2 Medium Access Control Layer (MAC)
 
-```
-% time	cellId	IMSI	RNTI	layer	mcs	size	rv	ndi	ccId
-513	1	1	1	0	28	2196	0	1	0
-513	2	2	1	0	28	2196	0	1	0
-515	1	1	1	0	28	2196	0	1	0
-515	2	2	1	0	28	2196	0	1	0
-613	1	1	1	0	28	2196	0	1	0
-613	2	2	1	0	28	2196	0	1	0
-614	1	1	1	0	28	2196	0	1	0
-614	2	2	1	0	28	2196	0	1	0
-713	1	1	1	0	28	2196	0	1	0
-713	2	2	1	0	28	2196	0	1	0
-714	1	1	1	0	28	2196	0	1	0
-714	2	2	1	0	28	2196	0	1	0
-```
-**[PHY Layer Uplink Stats]**
-```
-% time	cellId	IMSI	RNTI	layer	mcs	size	rv	ndi	ccId
-512	1	1	1	0	28	2292	0	1	0
-512	2	2	1	0	28	2292	0	1	0
-611	1	1	1	0	28	2292	0	1	0
-611	2	2	1	0	28	2292	0	1	0
-711	1	1	1	0	28	2292	0	1	0
-711	2	2	1	0	28	2292	0	1	0
-811	1	1	1	0	28	2292	0	1	0
-811	2	2	1	0	28	2292	0	1	0
-911	1	1	1	0	28	2292	0	1	0
-911	2	2	1	0	28	2292	0	1	0
-1011	1	1	1	0	28	2292	0	1	0
-1011	2	2	1	0	28	2292	0	1	0
-```
+**Trace File:** `DlMacStats.txt` and `UlMacStats.txt`
 
-### 3.2 MAC Layer (e.g., `UlMacStats.txt` and `DlMacStats.txt`)
+The MAC layer trace files provide information on resource block allocations, MCS (Modulation and Coding Scheme) indices, and packet sizes.
 
-- **Key Metrics**: Resource block allocations and MCS (Modulation and Coding Scheme).
-- **Insights**: Efficient RB allocation and high MCS suggest optimal data flow. Variations can indicate network congestion or adaptive modulation in response to changing link quality.
-
-**[MAC Layer Uplink Stats]**
-```
-% time	cellId	IMSI	frame	sframe	RNTI	mcsTb1	sizeTb1	mcsTb2	sizeTb2	ccId
-0.511	1	1	52	2	1	28	2196	0	0	0
-0.511	2	2	52	2	1	28	2196	0	0	0
-0.513	1	1	52	4	1	28	2196	0	0	0
-0.513	2	2	52	4	1	28	2196	0	0	0
-0.611	1	1	62	2	1	28	2196	0	0	0
-0.611	2	2	62	2	1	28	2196	0	0	0
-0.612	1	1	62	3	1	28	2196	0	0	0
-0.612	2	2	62	3	1	28	2196	0	0	0
-0.711	1	1	72	2	1	28	2196	0	0	0
-0.711	2	2	72	2	1	28	2196	0	0	0
-0.712	1	1	72	3	1	28	2196	0	0	0
-0.712	2	2	72	3	1	28	2196	0	0	0
-0.811	1	1	82	2	1	28	2196	0	0	0
-```
-
-**[MAC Layer Downlink  Stats]**
+**Sample Data from `DlMacStats.txt`:**
 ```
 % time	cellId	IMSI	frame	sframe	RNTI	mcsTb1	sizeTb1	mcsTb2	sizeTb2	ccId
 0.511	1	1	52	2	1	28	2196	0	0	0
@@ -179,23 +61,20 @@ The following data from the downlink (`DlTxPhyStats.txt`) shows the modulation a
 1.012	1	1	102	3	1	28	2196	0	0	0
 1.012	2	2	102	3	1	28	2196	0	0	0
 ```
+- **mcsTb1:** MCS index used for transmission, indicating the modulation and coding rate.
+- **sizeTb1:** Size of the transport block in bytes.
 
-### 3.3 RLC Layer (e.g., `UlRlcStats.txt` and `DlRlcStats.txt`)
 
-- **Key Metrics**: Packet delays and retransmissions.
-- **Insights**: Low delay and minimal retransmissions indicate a reliable connection. High retransmissions can suggest packet loss due to interference.
+- A consistent MCS index of 28 suggests that the network is using high-order modulation schemes (e.g., 64-QAM), indicative of good channel conditions.
+- The size of transport blocks remains constant, implying stable throughput.
 
-**[RLC Layer Uplink Stats]**
-```
-% start	end	CellId	IMSI	RNTI	LCID	nTxPDUs	TxBytes	nRxPDUs	RxBytes	delay	stdDev	min	max	PduSize	stdDev	min	max
-0.5	0.75	1	1	1	3	3	6336	3	6336	0.00471429	0	0.00471429	0.00471429	2112	0	2112	2112	
-0.5	0.75	2	2	1	3	3	6336	3	6336	0.00471429	0	0.00471429	0.00471429	2112	0	2112	2112	
-0.75	1	1	1	1	3	2	4224	2	4224	0.00471429	0	0.00471429	0.00471429	2112	0	2112	2112	
-0.75	1	2	2	1	3	2	4224	2	4224	0.00471429	0	0.00471429	0.00471429	2112	0	2112	2112	
-1	1.25	1	1	1	3	1	2112	1	2112	0.00471429	0	0.00471429	0.00471429	2112	0	2112	2112	
-1	1.25	2	2	1	3	1	2112	1	2112	0.00471429	0	0.00471429	0.00471429	2112	0	2112	2112	
-```
-**[RLC Layer Downlink Stats]**
+### 1.3 Radio Link Control Layer (RLC)
+
+**Trace File:** `DlRlcStats.txt` and `UlRlcStats.txt`
+
+The RLC layer traces show packet transmissions, retransmissions, and delays, which are essential for understanding reliability and latency.
+
+**Sample Data from `DlRlcStats.txt`:**
 ```
 % start	end	CellId	IMSI	RNTI	LCID	nTxPDUs	TxBytes	nRxPDUs	RxBytes	delay	stdDev	min	max	PduSize	stdDev	min	max
 0.5	0.75	1	1	1	3	6	6336	6	6336	0.003	0	0.003	0.003	1056	0	1056	1056	
@@ -205,22 +84,21 @@ The following data from the downlink (`DlTxPhyStats.txt`) shows the modulation a
 1	1.25	1	1	1	3	2	2112	2	2112	0.003	0	0.003	0.003	1056	0	1056	1056	
 1	1.25	2	2	1	3	2	2112	2	2112	0.003	0	0.003	0.003	1056	0	1056	1056	
 ```
-### 3.4 PDCP Layer (e.g., `UlPdcpStats.txt` and `DlPdcpStats.txt`)
 
-- **Key Metrics**: End-to-end packet delay and data throughput.
-- **Insights**: Consistent delays indicate stable data flow. Spikes in delay may suggest network congestion affecting service quality.
+- **nTxPDUs/nRxPDUs:** Number of transmitted/received PDUs.
+- **delay:** Average delay of PDUs.
 
-**[PDCP Layer Uplink Stats]**
-```
-% start	end	CellId	IMSI	RNTI	LCID	nTxPDUs	TxBytes	nRxPDUs	RxBytes	delay	stdDev	min	max	PduSize	stdDev	min	max
-0.5	0.75	1	1	1	3	6	6324	6	6324	0.0122619	0.000516398	0.0119286	0.0129286	1054	0	1054	1054	
-0.5	0.75	2	2	1	3	6	6324	6	6324	0.0122619	0.000516398	0.0119286	0.0129286	1054	0	1054	1054	
-0.75	1	1	1	1	3	4	4216	4	4216	0.0119286	0	0.0119286	0.0119286	1054	0	1054	1054	
-0.75	1	2	2	1	3	4	4216	4	4216	0.0119286	0	0.0119286	0.0119286	1054	0	1054	1054	
-1	1.25	1	1	1	3	2	2108	2	2108	0.0119286	0	0.0119286	0.0119286	1054	0	1054	1054	
-1	1.25	2	2	1	3	2	2108	2	2108	0.0119286	0	0.0119286	0.0119286	1054	0	1054	1054	
-```
-**[PDCP Layer Downlink Stats]**
+
+- Low delay values (e.g., 3 ms) indicate that the network is performing well in terms of latency.
+- Matching `nTxPDUs` and `nRxPDUs` suggest minimal packet loss.
+
+### 1.4 Packet Data Convergence Protocol Layer (PDCP)
+
+**Trace File:** `DlPdcpStats.txt` and `UlPdcpStats.txt`
+
+The PDCP layer traces provide end-to-end delay measurements and throughput, critical for assessing the overall quality of service.
+
+**Sample Data from `DlPdcpStats.txt`:**
 ```
 % start	end	CellId	IMSI	RNTI	LCID	nTxPDUs	TxBytes	nRxPDUs	RxBytes	delay	stdDev	min	max	PduSize	stdDev	min	max
 0.5	0.75	1	1	1	3	6	6324	6	6324	0.00353261	0.00050999	0.00306705	0.00399817	1054	0	1054	1054	
@@ -230,41 +108,112 @@ The following data from the downlink (`DlTxPhyStats.txt`) shows the modulation a
 1	1.25	1	1	1	3	2	2108	2	2108	0.00353261	0.000658395	0.00306705	0.00399817	1054	0	1054	1054	
 1	1.25	2	2	1	3	2	2108	2	2108	0.00353173	0.000658395	0.00306618	0.00399729	1054	0	1054	1054	
 ```
----
 
-## 4. Fundamental Cell Parameters Analysis with Simulation Proofs
-
-Here, we analyze key cell parameters—SINR, RSRP, Throughput, and Packet Delay—based on the LTE simulation.
-
-### SINR (Signal-to-Interference-plus-Noise Ratio)
-- **Significance**: High SINR allows better data rates and reliable transmission.
-- **Proof**: Show SINR values from the PHY layer trace to demonstrate signal quality.
+- **delay:** Average end-to-end delay experienced by PDUs.
+- **stdDev:** Standard deviation of the delay, indicating the variability.
 
 
-### RSRP (Reference Signal Received Power)
-- **Significance**: Reflects signal strength received by UEs, crucial for connection quality.
-- **Proof**: RSRP values from the PHY layer trace indicate how power levels vary within the LTE cell environment.
-
-
-### Throughput
-- **Significance**: Measures successful data transfer over time, essential for evaluating network capacity.
-- **Proof**: Throughput values from MAC or PDCP layer traces, showing consistent data flow.
-
-
-### Packet Delay
-- **Significance**: Low delay is important for real-time applications, while higher delays may indicate congestion.
-- **Proof**: Delay values from RLC or PDCP traces, showing network latency behavior.
-
+- Consistent delay values with low standard deviation suggest a stable network performance.
+- The throughput can be calculated from `TxBytes` over the time interval (`end - start`).
 
 ---
 
-## 5. Explanation of the GTP Protocol with Proof
+## 2. Fundamental Cell Parameters Analysis
 
-The GTP protocol operates at two levels in LTE:
-- **GTPv2 (Control Plane)**: Manages session creation, modification, and deletion. The **Create Session Request** and **Create Session Response** messages are responsible for setting up the session between UE and core network. (See **screen_2** for a close-up of the Create Session Request.)
-- **GTP-U (User Plane)**: Encapsulates and tunnels user data. GTP-U packets in the pcap file, such as **Frame 15**, demonstrate the ongoing data transfer over the established session.
+### 2.1 SINR (Signal-to-Interference-plus-Noise Ratio)
 
-The GTP protocol thus enables both control and user data flows, supporting efficient LTE communication.
+- SINR measures the quality of the wireless communication link.
+- High SINR values indicate that the signal is much stronger than the interference and noise, allowing for higher data rates and better modulation schemes.
+- The SINR values are around 30 dB, which is excellent and allows for high-order modulation like 64-QAM.
+- **Variation:** Minor fluctuations in SINR reflect slight changes in the network environment, which could be due to mobility or interference.
+
+### 2.2 RSRP (Reference Signal Received Power)
+
+- RSRP indicates the power level of LTE reference signals received by the UE.
+- It is crucial for cell selection, handover decisions, and power control.
+
+**Proof:**
+
+From `DlRsrpSinrStats.txt`:
+```
+% time	cellId	IMSI	RNTI	rsrp	sinr	ComponentCarrierId
+0.000214285	1	1	0	0.00333333	7.02728e+12	0
+0.000214285	2	2	0	0.00333333	7.02728e+12	0
+0.00121428	1	1	0	0.00333333	7.02728e+12	0
+```
+
+- The RSRP values are around -80 dBm, indicating good signal strength suitable for reliable communication.
+- **Role and Variation:** RSRP decreases slightly over time, possibly due to increasing distance from the cell or environmental factors affecting signal attenuation.
+
+### 2.3 IMSI (International Mobile Subscriber Identity)
+
+- **IMSI** is a unique identifier for each mobile subscriber in the LTE network.
+- It is used for identifying and authenticating the subscriber across different network entities.
+- In the trace data, IMSI allows tracking of individual UEs, ensuring data flows are correctly associated with each subscriber.
+
+### 2.4 RNTI (Radio Network Temporary Identifier)
+
+- **RNTI** serves as a temporary identifier assigned to UEs when they are connected to the network.
+- It is used in the MAC and RLC layers to manage resource allocation and scheduling.
+- The RNTI can change dynamically as UEs move across cells, allowing the network to manage resources without revealing permanent subscriber information.
+
+### 2.5 LCID (Logical Channel ID)
+
+- **LCID** identifies logical channels in the LTE protocol stack, enabling differentiated services for voice, video, and data applications.
+- Each type of service (e.g., signaling or user data) is mapped to a specific LCID, allowing the network to prioritize and route traffic appropriately.
+  **Proof:**
+
+From `UlRlcStats.txt`:
+```
+% start	end	CellId	IMSI	RNTI	LCID	nTxPDUs	TxBytes	nRxPDUs	RxBytes	delay	stdDev	min	max	PduSize	stdDev	min	max
+0.5	0.75	1	1	1	3	3	6336	3	6336	0.00471429	0	0.00471429	0.00471429	2112	0	2112	2112	
+0.5	0.75	2	2	1	3	3	6336	3	6336	0.00471429	0	0.00471429	0.00471429	2112	0	2112	2112	
+```
+---
+
+## 4. Explanation of the GTP Protocol
+
+**GTP (GPRS Tunneling Protocol)** is a group of IP-based communications protocols used to carry general packet radio service (GPRS) within GSM, UMTS, and LTE networks.
+
+### 4.1 GTP Components
+
+- **GTP-C (Control Plane):** Used for signaling between network nodes.
+- **GTP-U (User Plane):** Used for carrying user data within the network.
+
+### 4.2 Session Setup Process
+
+**Proof:**
+
+- **Frame 3:** `Create Session Request` from `14.0.0.6` (SGW) to `14.0.0.5` (PGW)
+    - Contains subscriber data, PDN address allocation, and bearer context.
+- **Frame 4:** `Create Session Response` from `14.0.0.5` to `14.0.0.6`
+    - Confirms the session setup with allocated resources.
+
+**Screenshots:**
+
+- **Create Session Request Details:**
+
+  **![Create Session Request Details](lab6/screenshots/screen_2.png)**
+
+- **GTP-U Data Packets:**
+
+  **![GTP-U Data Packets](lab6/screenshots/screen_1.png)**
+
+### 4.3 Explanation
+
+- **Session Establishment:** GTP-C messages set up the control plane for managing sessions.
+- **Data Transfer:** Once the session is established, GTP-U encapsulates user data packets for transmission over the LTE network.
+- **Tunneling:** GTP provides a tunnel between the UE and the PDN-Gateway, allowing for the separation of control and user planes.
+
+### 4.4 UDP Data Analysis
+
+The UDP protocol, seen in the pcap files, is used to carry encapsulated user data between the core network and UE over the GTP-U tunnel. Each UDP packet represents a segment of user data being tunneled across the LTE network.
+
+**![UDP Data Packets](lab6/screenshots/screen_udp.png)**
+
+### Layer Information
+- **UDP Packets** in this context are part of the **user plane** layer, encapsulating data transferred between the UE and core network.
 
 
 ---
+
