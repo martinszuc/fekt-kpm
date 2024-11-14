@@ -180,6 +180,7 @@ markdown
 Copy code
 ### Overview of Changes to `lte-full.cc`
 
+Changes made to code can be [seen here](https://github.com/martinszuc/fekt-kpm/blob/main/lab7/lte-full.cc) or [compare with original here](https://github.com/martinszuc/fekt-kpm/commit/e76cf77138c71422882c4de6ac73718782374798)
 The following modifications enhance the simulation's complexity, performance, and reliability. Each change includes a before-and-after example.
 
 #### 1. Increased Number of eNodeBs and UEs
@@ -215,8 +216,6 @@ Config::SetDefault("ns3::LteUeRrc::RrcConnectionReleaseOnIdle", BooleanValue(fal
 ```
 lteHelper->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(50));
 ```
-Changes made to code can be seen here
-
 # Flow Monitor Statistics Comparison
 
 ## Original Output
