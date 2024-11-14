@@ -107,7 +107,7 @@ This experiment demonstrated a functional LTE network setup using ns-3's emulate
 
 ---
 
-## 3. Mean Jitter
+## 3. Mean Jitter Calculation
 
 In the `lte-full.cc` file, the mean jitter for each flow is calculated based on the variations in packet delay times. Jitter refers to the difference in delay between consecutive packets in a flow.
 
@@ -144,7 +144,7 @@ Mean jitter calculation provides insight into network stability for real-time ap
 
 ---
 
-### 4. Program Modifications and Output Comparison
+## 4. Program Modifications and Output Comparison
 #### Changes in `lte-full.cc`
 - **Change 1:** Adjusted the number of eNBs and UEs.
 - **Change 2:** Enabled/disabled power control options to study their effects.
