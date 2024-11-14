@@ -80,7 +80,8 @@ We examined the `ClosedLoop` attribute in NS-3's LTE module to understand power 
  sudo ip link set veth1 promisc on
 ```
 
- 2. Following lines were added to the `lena-simple-epc-emu.cc` script
+ 2. Following lines were added to the `lena-simple-epc-emu.cc` script also visible at [link changes to script](https://github.com/martinszuc/fekt-kpm/commit/cd834af06e18e0a2dc7b276928f07440cbaa377c#diff-ea6ca31b9a2e439197f7b99657a25006a784cae55ff348583f523c1b05581040R80)
+
 ```
     // Set interface names for emulation
     epcHelper->SetAttribute("SgwDeviceName", StringValue("veth0")); // Interface for SGW
