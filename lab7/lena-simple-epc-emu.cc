@@ -69,20 +69,17 @@ main(int argc, char* argv[])
     // GlobalValue::Bind ("SimulatorImplementationType",
     //                 StringValue ("ns3::RealtimeSimulatorImpl"));
 
-    // let's speed things up, we don't need these details for this scenario
-    Config::SetDefault("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue(false));
-    Config::SetDefault("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue(false));
 
-    GlobalValue::Bind("ChecksumEnabled", BooleanValue(true));
-
-    ConfigStore inputConfig;
-    inputConfig.ConfigureDefaults();
-
-    // parse again so you can override default values from the command line
-    cmd.Parse(argc, argv);
+    // Enable logging
+    LogComponentEnable("EpcFirstExample", LOG_LEVEL_INFO);
 
     Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
     Ptr<EmuEpcHelper> epcHelper = CreateObject<EmuEpcHelper>();
+
+    // Set interface names for emulation
+    epcHelper->SetAttribute("SgwDeviceName", StringValue("veth0")); // Interface for SGW
+    epcHelper->SetAttribute("EnbDeviceName", StringValue("veth1")); // Interface for eNB
+
     lteHelper->SetEpcHelper(epcHelper);
     epcHelper->Initialize();
 
