@@ -110,11 +110,25 @@ The virtual interfaces created for this emulation were verified using the `ip li
 
 This output confirms that the interfaces `veth0` and `veth1` are configured and up, allowing for the emulated LTE communication setup.
 
-### Wireshark Observations
+## Wireshark Observations
 
-We captured network traffic on the virtual interfaces (`veth0` and `veth1`) using Wireshark. Observed traffic included ARP requests, GTP packets for tunneling, and LTE-specific control messages.
+We captured network traffic on the virtual interfaces (`veth0` and `veth1`) using Wireshark. The captured traffic highlights various network activities and protocols:
 
-- **Screenshot Placeholder**: Insert Wireshark capture screenshot here.
+1. **ARP Requests**: Address Resolution Protocol (ARP) requests are visible, showing the mapping of IP addresses to MAC addresses. For example, lines 16-20 show ARP requests asking for the MAC address corresponding to IP addresses in the local network, such as `10.0.0.1`.
+
+2. **GTP Packets**: The GPRS Tunneling Protocol (GTP) packets are prominent in the capture, primarily for data encapsulation and tunneling within the LTE environment. The `GTP` packets indicate communication between IP addresses in the simulated LTE network (e.g., `7.0.0.2` to `1.0.0.2`). These packets carry user data over the S1-U interface, which connects the eNodeB to the Serving Gateway (SGW).
+
+3. **LTE Data Transmission**: The captured GTP packets also include information about ports and payload sizes. For example:
+  - `Src port: 49153` to `Dst port: 2001/1234` indicates the packet source and destination ports, relevant to the data flows in LTE.
+  - Each GTP packet has a payload length of 1024 bytes, indicative of the data chunk sizes being transferred.
+
+4. **Protocol Information**: The screenshot shows protocol details for each packet:
+  - The **ICMPv6** entries (e.g., line 15) represent IPv6 neighbor solicitation messages, which are part of the IPv6 address resolution.
+  - The **GTP** entries signify the encapsulated user data packets that use LTE-specific tunneling.
+
+This capture validates the LTE network's emulated setup, showing active data transmission and network discovery procedures over the virtualized interfaces.
+
+**![Lena Simple EPC EMU Wireshark](lab7/screenshots/lena-simple-epc-emu-wireshark.png)**
 
 ### Conclusions
 
