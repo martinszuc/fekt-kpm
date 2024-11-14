@@ -70,7 +70,22 @@ We examined the `ClosedLoop` attribute in NS-3's LTE module to understand power 
 - When `ClosedLoop` is set to `false`, the UE operates in Open Loop mode, maintaining a fixed transmission power without network feedback. This mode is simpler and suitable for scenarios where consistent power is preferred or feedback is limited.
 ---
 
-### 2. Run Emulated Script `lena-simple-epc-emu.cc`
+## 2. Run Emulated Script `lena-simple-epc-emu.cc`
+
+### Setup for script
+ 1. The network interfaces were created using commands
+```
+ sudo ip link add name veth0 type veth peer name veth1
+ sudo ip link set veth0 promisc on
+ sudo ip link set veth1 promisc on
+```
+
+ 2. Following lines were added to the `lena-simple-epc-emu.cc` script
+```
+    // Set interface names for emulation
+    epcHelper->SetAttribute("SgwDeviceName", StringValue("veth0")); // Interface for SGW
+    epcHelper->SetAttribute("EnbDeviceName", StringValue("veth1")); // Interface for eNB
+```
 
 Upon running the script, we observed outputs indicating the initialization of the LTE components and network setups. Notable parts of the output included:
 
