@@ -6,7 +6,7 @@
  *  - Separate position allocators (one for eNodeBs, one for UEs)
  *  - RandomWayPoint Mobility for UEs
  *  - Cost231 Path Loss (suburban)
- *  - QoS (QCI=1) for voice-like traffic
+ *  - Dedicated EPS bearer with QCI=1 for voice
  *  - FlowMonitor for throughput, delay, packet loss
  *  - NetAnim visualization
  *  - PCAP tracing on P2P link (PGW <-> RemoteHost)
@@ -30,13 +30,26 @@ using namespace ns3;
 // Logging for debugging
 NS_LOG_COMPONENT_DEFINE("EnhancedLteSimulation");
 
-// (1) Configure QoS: Set QCI=1 for voice priority
-void ConfigureQoS()
+// (1) Instead of setting "ns3::LteBearersManager::DefaultQci" via Config::SetDefault,
+//     we explicitly create & activate a dedicated bearer with QCI=1 after attaching.
+
+void ActivateVoiceBearer(Ptr<LteHelper> lteHelper, NetDeviceContainer ueDevs)
 {
-  Config::SetDefault("ns3::LteBearersManager::DefaultQci", UintegerValue(1));
+  // EpsBearer::GBR_CONV_VOICE typically corresponds to QCI=1
+  EpsBearer voiceBearer(EpsBearer::GBR_CONV_VOICE);
+  voiceBearer.arp.priorityLevel = 1;
+  voiceBearer.arp.preemptionCapability = true;
+  voiceBearer.arp.preemptionVulnerability = false;
+
+  // Activate on each UE device
+  for (uint32_t i = 0; i < ueDevs.GetN(); ++i)
+  {
+    Ptr<NetDevice> ueDevice = ueDevs.Get(i);
+    lteHelper->ActivateDedicatedEpsBearer(ueDevice, voiceBearer, EpcTft::Default());
+  }
 }
 
-// (2) Optional Carrier Aggregation: 2 component carriers
+// (2) Optional Carrier Aggregation (two component carriers)
 void EnableCarrierAggregation(Ptr<LteHelper> lteHelper)
 {
   Config::SetDefault("ns3::LteHelper::UseCa", BooleanValue(true));
@@ -51,14 +64,14 @@ void ConfigurePathLossModel(Ptr<LteHelper> lteHelper)
   lteHelper->SetAttribute("PathlossModel", PointerValue(lossModel));
 }
 
-// (4) Enable PCAP on P2P link
+// (4) Enable PCAP on the P2P link
 void EnableP2pTracing(PointToPointHelper &p2p, NetDeviceContainer devices)
 {
   p2p.EnablePcap("enhanced-lte-p2p", devices.Get(0), false);
   p2p.EnablePcap("enhanced-lte-p2p", devices.Get(1), false);
 }
 
-// (5) Install FlowMonitor for stats
+// (5) FlowMonitor for stats
 Ptr<FlowMonitor> SetupFlowMonitor()
 {
   FlowMonitorHelper flowHelper;
@@ -71,29 +84,28 @@ void SetupAnimation(NodeContainer enbNodes, NodeContainer ueNodes, Ptr<Node> pgw
   AnimationInterface anim("enhanced-lte.xml");
   anim.SetMobilityPollInterval(Seconds(1));
 
-  // PGW & remote host
   anim.UpdateNodeDescription(pgw, "PGW");
   anim.UpdateNodeDescription(remoteHost, "RemoteHost");
 
   // eNodeBs => green
   for (uint32_t i = 0; i < enbNodes.GetN(); ++i)
   {
-    anim.UpdateNodeDescription(enbNodes.Get(i), "eNodeB_" + std::to_string(i+1));
+    anim.UpdateNodeDescription(enbNodes.Get(i), "eNodeB_" + std::to_string(i + 1));
     anim.UpdateNodeColor(enbNodes.Get(i), 0, 255, 0);
   }
   // UEs => blue
   for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
   {
-    anim.UpdateNodeDescription(ueNodes.Get(i), "UE_" + std::to_string(i+1));
+    anim.UpdateNodeDescription(ueNodes.Get(i), "UE_" + std::to_string(i + 1));
     anim.UpdateNodeColor(ueNodes.Get(i), 0, 0, 255);
   }
 
-  // Fix PGW & remote host in place
+  // Fix PGW & remote host in place for clarity
   anim.SetConstantPosition(pgw, -500, 0);
   anim.SetConstantPosition(remoteHost, -600, 0);
 }
 
-// (7) Simple UDP echo for voice traffic
+// (7) Simple UDP Echo for voice-like traffic
 void SetupUdpEchoTraffic(NodeContainer ueNodes, Ptr<Node> remoteHost, Ipv4Address hostAddr,
                          uint16_t port, double startTime, double stopTime)
 {
@@ -107,7 +119,7 @@ void SetupUdpEchoTraffic(NodeContainer ueNodes, Ptr<Node> remoteHost, Ipv4Addres
   UdpEchoClientHelper echoClient(hostAddr, port);
   echoClient.SetAttribute("MaxPackets", UintegerValue(10000));
   echoClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
-  echoClient.SetAttribute("PacketSize", UintegerValue(512)); // ~ typical voice payload
+  echoClient.SetAttribute("PacketSize", UintegerValue(512));
 
   ApplicationContainer clientApps;
   for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
@@ -118,7 +130,7 @@ void SetupUdpEchoTraffic(NodeContainer ueNodes, Ptr<Node> remoteHost, Ipv4Addres
   clientApps.Stop(Seconds(stopTime));
 }
 
-// (8) Print FlowMonitor results: throughput, delay, packet loss
+// (8) FlowMonitor results: throughput, delay, packet loss
 void AnalyzeData(Ptr<FlowMonitor> monitor)
 {
   monitor->CheckForLostPackets();
@@ -153,20 +165,17 @@ void AnalyzeData(Ptr<FlowMonitor> monitor)
               << "  Mean Delay: " << meanDelayMs << " ms\n"
               << "  Packet Loss: " << lossPct << " %\n\n";
   }
-  // Save to XML for additional offline analysis
   monitor->SerializeToXmlFile("flow-results.xml", true, true);
 }
 
-// -----------------------------------------------------------------
-// MAIN
-// -----------------------------------------------------------------
+// Main
 int main(int argc, char *argv[])
 {
   // Default settings
-  uint16_t numEnbs  = 2;  // eNodeBs
-  uint16_t numUes   = 5;  // UEs
-  double   simTime  = 20; // seconds
-  bool     useCa    = false;
+  uint16_t numEnbs  = 2;   // eNodeBs
+  uint16_t numUes   = 5;   // UEs
+  double   simTime  = 20;  // seconds
+  bool     useCa    = false; // Toggle carrier aggregation
 
   CommandLine cmd(__FILE__);
   cmd.AddValue("numEnbs",  "Number of eNodeBs", numEnbs);
@@ -175,7 +184,7 @@ int main(int argc, char *argv[])
   cmd.AddValue("useCa",    "Enable Carrier Aggregation", useCa);
   cmd.Parse(argc, argv);
 
-  // Optional debugging logs
+  // Optional debug logs
   LogComponentEnable("EnhancedLteSimulation", LOG_LEVEL_INFO);
 
   // Create LTE + EPC
@@ -184,29 +193,24 @@ int main(int argc, char *argv[])
   lteHelper->SetEpcHelper(epcHelper);
   epcHelper->Initialize();
 
-  // QoS for voice traffic
-  ConfigureQoS();
-
   // Carrier Aggregation if toggled
   if (useCa)
   {
     EnableCarrierAggregation(lteHelper);
   }
 
-  // Use Cost231 suburban path-loss
+  // Suburban path loss
   ConfigurePathLossModel(lteHelper);
 
-  // Create eNodeB and UE nodes
+  // Create eNodeB & UE nodes
   NodeContainer enbNodes;
   enbNodes.Create(numEnbs);
   NodeContainer ueNodes;
   ueNodes.Create(numUes);
 
-  // ---------------- eNodeB Mobility ----------------
-  // Use a ListPositionAllocator for eNodeBs
+  // eNodeBs: simple list placement + constant
   MobilityHelper enbMobility;
   Ptr<ListPositionAllocator> enbPosAlloc = CreateObject<ListPositionAllocator>();
-  // Place each eNodeB some distance apart in a line
   for (uint16_t i = 0; i < numEnbs; i++)
   {
     enbPosAlloc->Add(Vector(100.0 * i, 200.0, 0.0));
@@ -215,8 +219,7 @@ int main(int argc, char *argv[])
   enbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
   enbMobility.Install(enbNodes);
 
-  // ---------------- UE Mobility ----------------
-  // Use a separate position allocator + random waypoint
+  // UEs: random waypoint in 500x500
   MobilityHelper ueMobility;
   ueMobility.SetPositionAllocator("ns3::RandomRectanglePositionAllocator",
                                   "X", StringValue("ns3::UniformRandomVariable[Min=0|Max=500]"),
@@ -227,24 +230,24 @@ int main(int argc, char *argv[])
                               "Bounds", RectangleValue(Rectangle(0, 500, 0, 500)));
   ueMobility.Install(ueNodes);
 
-  // Install LTE devices
+  // LTE devices
   NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes);
   NetDeviceContainer ueDevs  = lteHelper->InstallUeDevice(ueNodes);
 
-  // Attach UEs to eNodeBs (round-robin)
+  // Attach UEs round-robin
   for (uint32_t i = 0; i < ueDevs.GetN(); ++i)
   {
     lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(i % enbDevs.GetN()));
   }
 
-  // Install IP stack on UEs
+  // IP stack on UEs
   InternetStackHelper stack;
   stack.Install(ueNodes);
 
-  // Assign IP addresses to UEs
+  // Assign IP to UEs
   epcHelper->AssignUeIpv4Address(ueDevs);
 
-  // Default gateway for UEs
+  // Default gateway
   Ipv4StaticRoutingHelper ipv4RoutingHelper;
   for (uint32_t i = 0; i < ueNodes.GetN(); i++)
   {
@@ -269,11 +272,11 @@ int main(int argc, char *argv[])
   Ipv4InterfaceContainer ifaces = ipv4h.Assign(p2pDevices);
   Ipv4Address remoteHostAddr = ifaces.GetAddress(1);
 
-  // Add route on remote host to reach UEs
+  // Route on remote host => reach 7.0.0.0 for UEs
   Ptr<Ipv4StaticRouting> remoteHostStatic = ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
   remoteHostStatic->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
 
-  // PCAP tracing on P2P link
+  // PCAP tracing
   EnableP2pTracing(p2p, p2pDevices);
 
   // FlowMonitor
@@ -282,7 +285,10 @@ int main(int argc, char *argv[])
   // NetAnim
   SetupAnimation(enbNodes, ueNodes, pgw, remoteHost);
 
-  // Voice-like UDP echo traffic
+  // (IMPORTANT) Activate dedicated voice bearer (QCI=1) for each UE
+  ActivateVoiceBearer(lteHelper, ueDevs);
+
+  // Voice-like UDP echo
   SetupUdpEchoTraffic(ueNodes, remoteHost, remoteHostAddr, 9999, 1.0, simTime);
 
   // Run
