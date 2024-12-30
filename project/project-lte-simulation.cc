@@ -2,16 +2,17 @@
 /*
  * LTE Network Simulation (NS-3.39)
  * Demonstrates:
- *   - Multiple eNodeBs (>=2) and UEs (>=5)
- *   - Separate position allocators for eNodeBs, UEs
- *   - RandomWaypointMobilityModel (no invalid Bounds attribute)
- *   - Cost231PropagationLossModel for suburban
- *   - Dedicated EPS bearer (QCI=1) for voice
- *   - FlowMonitor for throughput, delay, packet loss
- *   - NetAnim visualization
- *   - PCAP tracing on P2P link
+ *  - Multiple eNodeBs (>=2) and UEs (>=5)
+ *  - Separate position allocators for eNodeBs, UEs
+ *  - RandomWaypointMobilityModel referencing a common PositionAllocator
+ *  - Cost231PropagationLossModel for suburban
+ *  - Dedicated EPS bearer (QCI=1) for voice
+ *  - FlowMonitor for throughput, delay, packet loss
+ *  - NetAnim visualization
+ *  - PCAP tracing on the P2P link
  *
  * Author: Martin Szuc
+ * Updated by: [Your Name/Handle]
  */
 
 #include "ns3/core-module.h"
@@ -29,7 +30,7 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("LteFinalAssignment");
 
-// (1) Activate QCI=1 bearer on UEs (voice priority)
+/* (1) Activate QCI=1 bearer on UEs (voice priority) */
 void
 ActivateVoiceQciOneBearer(Ptr<LteHelper> lteHelper, NetDeviceContainer ueDevices)
 {
@@ -44,7 +45,7 @@ ActivateVoiceQciOneBearer(Ptr<LteHelper> lteHelper, NetDeviceContainer ueDevices
   }
 }
 
-// (2) Optional Carrier Aggregation (two component carriers)
+/* (2) Optional Carrier Aggregation */
 void
 EnableCarrierAggregation(Ptr<LteHelper> lteHelper)
 {
@@ -53,7 +54,7 @@ EnableCarrierAggregation(Ptr<LteHelper> lteHelper)
   Config::SetDefault("ns3::LteHelper::EnbComponentCarrierManager", StringValue("ns3::RrComponentCarrierManager"));
 }
 
-// (3) Configure Cost231 path loss (via TypeId lookup)
+/* (3) Configure Cost231PropagationLossModel by TypeId lookup */
 void
 ConfigureCost231Pathloss(Ptr<LteHelper> lteHelper)
 {
@@ -61,7 +62,7 @@ ConfigureCost231Pathloss(Ptr<LteHelper> lteHelper)
   lteHelper->SetPathlossModelType(cost231Id);
 }
 
-// (4) PCAP tracing on the P2P link
+/* (4) Enable PCAP tracing on P2P link */
 void
 EnableP2pTracing(PointToPointHelper &p2p, NetDeviceContainer devices)
 {
@@ -69,7 +70,7 @@ EnableP2pTracing(PointToPointHelper &p2p, NetDeviceContainer devices)
   p2p.EnablePcap("lte-project-p2p", devices.Get(1), false);
 }
 
-// (5) FlowMonitor for throughput, delay, packet loss
+/* (5) FlowMonitor for throughput, delay, packet loss */
 Ptr<FlowMonitor>
 SetupFlowMonitor()
 {
@@ -77,7 +78,7 @@ SetupFlowMonitor()
   return flowHelper.InstallAll();
 }
 
-// (6) NetAnim setup
+/* (6) NetAnim setup */
 void
 SetupNetAnim(NodeContainer enbNodes, NodeContainer ueNodes,
              Ptr<Node> pgw, Ptr<Node> remoteHost)
@@ -102,24 +103,22 @@ SetupNetAnim(NodeContainer enbNodes, NodeContainer ueNodes,
     anim.UpdateNodeColor(ueNodes.Get(i), 0, 0, 255);
   }
 
-  // Fix PGW & remote host positions for clarity
+  // Fix PGW & remote host for clarity
   anim.SetConstantPosition(pgw, -500, 0);
   anim.SetConstantPosition(remoteHost, -600, 0);
 }
 
-// (7) Simple UDP echo (voice-like)
+/* (7) Simple UDP Echo approximating voice traffic */
 void
 SetupUdpEchoVoice(NodeContainer ueNodes, Ptr<Node> remoteHost,
                   Ipv4Address hostAddr, uint16_t port,
                   double startTime, double stopTime)
 {
-  // Server on remote host
   UdpEchoServerHelper echoServer(port);
   ApplicationContainer serverApps = echoServer.Install(remoteHost);
   serverApps.Start(Seconds(startTime));
   serverApps.Stop(Seconds(stopTime));
 
-  // Clients on UEs
   UdpEchoClientHelper echoClient(hostAddr, port);
   echoClient.SetAttribute("MaxPackets", UintegerValue(10000));
   echoClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
@@ -134,7 +133,7 @@ SetupUdpEchoVoice(NodeContainer ueNodes, Ptr<Node> remoteHost,
   clientApps.Stop(Seconds(stopTime));
 }
 
-// (8) Print FlowMonitor results
+/* (8) Print FlowMonitor results */
 void
 AnalyzeFlowMonitor(Ptr<FlowMonitor> monitor)
 {
@@ -183,10 +182,9 @@ AnalyzeFlowMonitor(Ptr<FlowMonitor> monitor)
 int
 main(int argc, char *argv[])
 {
-  // Default config
-  uint16_t numEnbs  = 2;    // eNodeBs
-  uint16_t numUes   = 5;    // UEs
-  double   simTime  = 20;   // seconds
+  uint16_t numEnbs  = 2;   // eNodeBs
+  uint16_t numUes   = 5;   // UEs
+  double   simTime  = 20;  // seconds
   bool     useCa    = false;
 
   CommandLine cmd(__FILE__);
@@ -218,26 +216,34 @@ main(int argc, char *argv[])
   enbNodes.Create(numEnbs);
   ueNodes.Create(numUes);
 
-  // E. eNodeBs: distinct position allocator + constant mobility
+  // E. eNodeBs: list-based positions + constant mobility
   MobilityHelper enbMobility;
   Ptr<ListPositionAllocator> enbPosAlloc = CreateObject<ListPositionAllocator>();
-  for (uint16_t i = 0; i < numEnbs; ++i)
+  for (uint16_t i = 0; i < numEnbs; i++)
   {
-    // Place each eNodeB in a line, spaced out
     enbPosAlloc->Add(Vector(100.0 * i, 200.0, 0.0));
   }
   enbMobility.SetPositionAllocator(enbPosAlloc);
   enbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
   enbMobility.Install(enbNodes);
 
-  // F. UEs: separate position allocator + RandomWaypoint (no invalid Bounds)
+  // F. UEs: random initial positions + RandomWaypoint
+  // Manually create the random rectangle position allocator
+  ObjectFactory allocFactory;
+  allocFactory.SetTypeId("ns3::RandomRectanglePositionAllocator");
+  allocFactory.Set("X", StringValue("ns3::UniformRandomVariable[Min=0|Max=500]"));
+  allocFactory.Set("Y", StringValue("ns3::UniformRandomVariable[Min=0|Max=500]"));
+  Ptr<PositionAllocator> uePosAlloc = allocFactory.Create()->GetObject<PositionAllocator>();
+
+  // Then reference that same uePosAlloc in the RandomWaypoint model
   MobilityHelper ueMobility;
-  ueMobility.SetPositionAllocator("ns3::RandomRectanglePositionAllocator",
-                                  "X", StringValue("ns3::UniformRandomVariable[Min=0|Max=500]"),
-                                  "Y", StringValue("ns3::UniformRandomVariable[Min=0|Max=500]"));
+  ueMobility.SetPositionAllocator(uePosAlloc);
   ueMobility.SetMobilityModel("ns3::RandomWaypointMobilityModel",
-                              "Speed",  StringValue("ns3::UniformRandomVariable[Min=1.0|Max=10.0]"),
-                              "Pause",  StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
+                              "Speed", StringValue("ns3::UniformRandomVariable[Min=1.0|Max=10.0]"),
+                              "Pause", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"),
+                              // The crucial part: pass the same uePosAlloc as the PositionAllocator
+                              "PositionAllocator", PointerValue(uePosAlloc));
+
   ueMobility.Install(ueNodes);
 
   // G. LTE devices
@@ -248,7 +254,7 @@ main(int argc, char *argv[])
   InternetStackHelper ipStack;
   ipStack.Install(ueNodes);
 
-  // I. Assign IP addresses after UE devices are created
+  // I. Assign IP addresses to UEs
   epcHelper->AssignUeIpv4Address(ueDevs);
 
   // J. Default route for UEs
@@ -260,7 +266,7 @@ main(int argc, char *argv[])
     ueStatic->SetDefaultRoute(epcHelper->GetUeDefaultGatewayAddress(), 1);
   }
 
-  // K. Attach UEs to eNodeBs (round-robin)
+  // K. Attach UEs (round-robin)
   for (uint32_t i = 0; i < ueDevs.GetN(); ++i)
   {
     lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(i % enbDevs.GetN()));
@@ -283,7 +289,7 @@ main(int argc, char *argv[])
   Ipv4InterfaceContainer ifaces = ipv4h.Assign(p2pDevices);
   Ipv4Address remoteHostAddr = ifaces.GetAddress(1);
 
-  // M. Route from remote host to UEs
+  // M. Route from remote host => UE subnets
   Ptr<Ipv4StaticRouting> remoteHostStatic =
       ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
   remoteHostStatic->AddNetworkRouteTo(Ipv4Address("7.0.0.0"),
@@ -299,18 +305,16 @@ main(int argc, char *argv[])
   // P. NetAnim
   SetupNetAnim(enbNodes, ueNodes, pgw, remoteHost);
 
-  // Q. Activate QCI=1 for voice (after IP is assigned + attach done)
+  // Q. QCI=1 for voice
   ActivateVoiceQciOneBearer(lteHelper, ueDevs);
 
-  // R. Voice-like UDP Echo (start=1s, end=simTime)
+  // R. Voice-like UDP echo
   SetupUdpEchoVoice(ueNodes, remoteHost, remoteHostAddr, 9999, 1.0, simTime);
 
   Simulator::Stop(Seconds(simTime));
   Simulator::Run();
 
-  // FlowMonitor analysis
   AnalyzeFlowMonitor(monitor);
-
   Simulator::Destroy();
   return 0;
 }
