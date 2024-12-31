@@ -1,7 +1,14 @@
-/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-/*
- * NS-3.39 LTE Simulation
- * Assignment 04: LTE Network Simulation in Suburban Area
+/**
+ * @file lte-simulation-assignment.cpp
+ * @brief LTE Network Simulation for Suburban Area in NS-3.39
+ *
+ * This simulation creates an LTE network scenario with:
+ * - Multiple eNodeBs and UEs
+ * - Suburban propagation loss model
+ * - Mobility and traffic generation
+ *
+ * @version 1.0
+ * @date 2024
  */
 
 #include "ns3/core-module.h"
@@ -18,40 +25,11 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("LteSimulationAssignment");
 
-int main(int argc, char *argv[]) {
-    uint16_t numEnbs = 2;
-    uint16_t numUes = 5;
-    double simTime   = 20.0;
-
-    CommandLine cmd;
-    cmd.AddValue("numEnbs", "Number of eNodeBs", numEnbs);
-    cmd.AddValue("numUes",  "Number of UEs", numUes);
-    cmd.AddValue("simTime", "Simulation time (s)", simTime);
-    cmd.Parse(argc, argv);
-
-    NS_LOG_INFO("Starting LTE Simulation...");
-
-    // Create LTE and EPC helper
-    Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
-    Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
-    lteHelper->SetEpcHelper(epcHelper);
-
-    // Configure Path Loss Model
-    lteHelper->SetPathlossModelType(TypeId::LookupByName("ns3::Cost231PropagationLossModel"));
-
-    // Create Nodes
-    NodeContainer enbNodes, ueNodes, remoteHostContainer;
-    enbNodes.Create(numEnbs);
-    ueNodes.Create(numUes);
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-
-    // Install Internet Stack
-    InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
-    internet.Install(ueNodes);
-
-    // eNodeB Mobility
+/**
+ * @brief Configure mobility for eNodeBs.
+ * @param enbNodes NodeContainer for eNodeBs
+ */
+void ConfigureEnbMobility(NodeContainer &enbNodes) {
     MobilityHelper enbMobility;
     Ptr<ListPositionAllocator> enbPositionAlloc = CreateObject<ListPositionAllocator>();
     enbPositionAlloc->Add(Vector(0.0, 100.0, 0.0));   // eNodeB #1
@@ -59,8 +37,13 @@ int main(int argc, char *argv[]) {
     enbMobility.SetPositionAllocator(enbPositionAlloc);
     enbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     enbMobility.Install(enbNodes);
+}
 
-    // UE Mobility
+/**
+ * @brief Configure mobility for UEs.
+ * @param ueNodes NodeContainer for UEs
+ */
+void ConfigureUeMobility(NodeContainer &ueNodes) {
     MobilityHelper ueMobility;
     Ptr<PositionAllocator> uePositionAlloc = CreateObject<RandomRectanglePositionAllocator>();
     uePositionAlloc->SetAttribute("X", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
@@ -71,43 +54,71 @@ int main(int argc, char *argv[]) {
                                 "Pause", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"),
                                 "PositionAllocator", PointerValue(uePositionAlloc));
     ueMobility.Install(ueNodes);
+}
 
-    // Install LTE Devices
+/**
+ * @brief Set up the LTE simulation environment.
+ * @param numEnbs Number of eNodeBs
+ * @param numUes Number of UEs
+ * @param simTime Simulation time
+ */
+void RunLteSimulation(uint16_t numEnbs, uint16_t numUes, double simTime) {
+    NS_LOG_INFO("Starting LTE Simulation...");
+
+    // Create LTE and EPC helpers
+    Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
+    Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
+    lteHelper->SetEpcHelper(epcHelper);
+
+    // Configure path loss model
+    lteHelper->SetPathlossModelType(TypeId::LookupByName("ns3::Cost231PropagationLossModel"));
+
+    // Create nodes
+    NodeContainer enbNodes, ueNodes, remoteHostContainer;
+    enbNodes.Create(numEnbs);
+    ueNodes.Create(numUes);
+    remoteHostContainer.Create(1);
+    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
+
+    // Configure mobility
+    ConfigureEnbMobility(enbNodes);
+    ConfigureUeMobility(ueNodes);
+
+    // Install Internet stack
+    InternetStackHelper internet;
+    internet.Install(remoteHostContainer);
+    internet.Install(ueNodes);
+
+    // Install LTE devices
     NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes);
-    NetDeviceContainer ueDevs  = lteHelper->InstallUeDevice(ueNodes);
+    NetDeviceContainer ueDevs = lteHelper->InstallUeDevice(ueNodes);
 
     // Assign IPs to UEs
-    Ipv4InterfaceContainer ueIpIfaces =
-        epcHelper->AssignUeIpv4Address(NetDeviceContainer(ueDevs));
+    Ipv4InterfaceContainer ueIpIfaces = epcHelper->AssignUeIpv4Address(ueDevs);
 
-    // Attach each UE to an eNB (round-robin)
+    // Attach UEs to eNodeBs
     for (uint32_t i = 0; i < ueDevs.GetN(); ++i) {
         lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(i % numEnbs));
     }
 
-    // Create RemoteHost <-> PGW link
+    // Configure remote host link
     PointToPointHelper p2p;
     p2p.SetDeviceAttribute("DataRate", StringValue("10Gbps"));
     p2p.SetChannelAttribute("Delay", StringValue("2ms"));
     NetDeviceContainer internetDevices = p2p.Install(epcHelper->GetPgwNode(), remoteHost);
 
-    // Assign IP addresses on the above link
     Ipv4AddressHelper ipv4Helper;
     ipv4Helper.SetBase("1.0.0.0", "255.0.0.0");
     Ipv4InterfaceContainer internetIfaces = ipv4Helper.Assign(internetDevices);
 
-    // Set default route on remoteHost
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        Ipv4RoutingHelper::GetRouting<Ipv4StaticRouting>(
-            remoteHost->GetObject<Ipv4>()->GetRoutingProtocol());
-    remoteHostStaticRouting->AddNetworkRouteTo(
-        Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), // UE network
-        internetIfaces.GetAddress(1),                 // Next hop
-        1                                             // Interface index on remoteHost
-    );
+    // Set up routing for remote host
+    Ptr<Ipv4StaticRouting> remoteHostStaticRouting = Ipv4RoutingHelper::GetRouting<Ipv4StaticRouting>(
+        remoteHost->GetObject<Ipv4>()->GetRoutingProtocol());
+    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"),
+                                               internetIfaces.GetAddress(1), 1);
 
-    // Install a UDP Echo application (server on remoteHost, clients on UEs)
-    UdpEchoServerHelper echoServer(9); // UDP port
+    // Install traffic applications
+    UdpEchoServerHelper echoServer(9);
     ApplicationContainer serverApps = echoServer.Install(remoteHost);
     serverApps.Start(Seconds(1.0));
     serverApps.Stop(Seconds(simTime));
@@ -120,11 +131,29 @@ int main(int argc, char *argv[]) {
     clientApps.Start(Seconds(2.0));
     clientApps.Stop(Seconds(simTime));
 
-    // Run the simulation
+    // Run simulation
     Simulator::Stop(Seconds(simTime));
     Simulator::Run();
     Simulator::Destroy();
 
     NS_LOG_INFO("LTE Simulation Complete.");
+}
+
+/**
+ * @brief Main function for LTE simulation.
+ */
+int main(int argc, char *argv[]) {
+    uint16_t numEnbs = 2;
+    uint16_t numUes = 5;
+    double simTime = 20.0;
+
+    CommandLine cmd;
+    cmd.AddValue("numEnbs", "Number of eNodeBs", numEnbs);
+    cmd.AddValue("numUes", "Number of UEs", numUes);
+    cmd.AddValue("simTime", "Simulation time (s)", simTime);
+    cmd.Parse(argc, argv);
+
+    RunLteSimulation(numEnbs, numUes, simTime);
+
     return 0;
 }
