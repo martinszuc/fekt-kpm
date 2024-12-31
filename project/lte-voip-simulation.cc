@@ -3,8 +3,6 @@
  * @brief LTE simulation with VoIP traffic, FlowMonitor, PCAP on Point-to-Point Link, and Gnuplot (ns-3.39 compatible).
  * @details Generates .plt files for throughput, latency, packet loss, and jitter metrics.
  *          Enables PCAP tracing on the point-to-point link between PGW and remote host.
- * @author
- * Martin Szuc
  */
 
 #include "ns3/core-module.h"
@@ -31,6 +29,28 @@ void InstallVoipApplications(NodeContainer &ueNodes, Ipv4Address remoteAddr, dou
 Ptr<FlowMonitor> SetupFlowMonitor(FlowMonitorHelper &flowHelper);
 void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMonitor, const std::string &outputDir);
 void EnableLteTraces(Ptr<LteHelper> lteHelper);
+void FixZPosition(Ptr<MobilityModel> mobility, double desiredZ, Vector newPos);
+
+/**
+ * @brief Callback function to enforce a fixed z-position.
+ * @param mobility Pointer to the MobilityModel.
+ * @param desiredZ The desired z-coordinate.
+ * @param newPos The new position vector.
+ */
+void FixZPosition(Ptr<MobilityModel> mobility, double desiredZ, Vector newPos)
+{
+    // Log the incoming position
+    NS_LOG_INFO("FixZPosition Callback: Current Position = ("
+                << newPos.x << ", " << newPos.y << ", " << newPos.z << ")");
+
+    // Check if z is already set correctly to avoid infinite loops
+    if (newPos.z != desiredZ)
+    {
+        newPos.z = desiredZ;
+        mobility->SetPosition(newPos);
+        NS_LOG_INFO("FixZPosition Callback: z-coordinate set to " << desiredZ << " meters.");
+    }
+}
 
 /**
  * @brief Main function for LTE + VoIP simulation.
@@ -66,14 +86,14 @@ int main(int argc, char *argv[])
     Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
     lteHelper->SetEpcHelper(epcHelper);
 
-    // Configure Path Loss Model
-    lteHelper->SetPathlossModelType(TypeId::LookupByName("ns3::OkumuraHataPropagationLossModel"));
-    lteHelper->SetPathlossModelAttribute("Environment", StringValue("SubUrban"));
-    lteHelper->SetPathlossModelAttribute("Frequency", DoubleValue(1800.0));
-
     // Configure Mobility
     ConfigureEnbMobility(enbNodes);
     ConfigureUeMobility(ueNodes);
+
+    // Configure Path Loss Model AFTER setting node positions
+    lteHelper->SetPathlossModelType(TypeId::LookupByName("ns3::OkumuraHataPropagationLossModel"));
+    lteHelper->SetPathlossModelAttribute("Environment", StringValue("SubUrban"));
+    lteHelper->SetPathlossModelAttribute("Frequency", DoubleValue(1800.0));
 
     // Install LTE devices
     NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes);
@@ -127,6 +147,8 @@ void ConfigureLogging()
     LogComponentEnable("LTEVoipSimulation", LOG_LEVEL_INFO);
     LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);
     LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
+    // Removed invalid log component
+    // LogComponentEnable("MobilityModel", LOG_LEVEL_INFO); // Removed because it's not a valid component
 }
 
 /**
@@ -142,6 +164,14 @@ void ConfigureEnbMobility(NodeContainer &enbNodes)
     enbMobility.SetPositionAllocator(posAlloc);
     enbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     enbMobility.Install(enbNodes);
+
+    // Log eNodeB positions
+    for (uint32_t i = 0; i < enbNodes.GetN(); ++i)
+    {
+        Ptr<MobilityModel> mobility = enbNodes.Get(i)->GetObject<MobilityModel>();
+        Vector pos = mobility->GetPosition();
+        NS_LOG_INFO("eNodeB " << i << " Position: " << pos);
+    }
 }
 
 /**
@@ -161,13 +191,19 @@ void ConfigureUeMobility(NodeContainer &ueNodes)
                                 "PositionAllocator", PointerValue(positionAlloc));
     ueMobility.Install(ueNodes);
 
-    // Set height of UEs (Z-axis)
+    // Set height of UEs (Z-axis) and connect the FixZPosition callback
     for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
     {
         Ptr<MobilityModel> mobility = ueNodes.Get(i)->GetObject<MobilityModel>();
-        Vector position = mobility->GetPosition();
-        position.z = 1.5; // Set height to 1.5m
-        mobility->SetPosition(position);
+        Vector pos = mobility->GetPosition();
+        pos.z = 1.5; // Set height to 1.5m
+        mobility->SetPosition(pos);
+
+        // Connect the FixZPosition callback to ensure z remains at 1.5m
+        mobility->TraceConnectWithoutContext("Position", MakeBoundCallback(&FixZPosition, mobility, 1.5));
+
+        // Log UE positions
+        NS_LOG_INFO("UE " << i << " Initial Position: " << pos);
     }
 }
 
@@ -189,6 +225,28 @@ Ipv4Address CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper, NodeContainer
     Ipv4AddressHelper ipv4;
     ipv4.SetBase("1.0.0.0", "255.255.255.0");
     Ipv4InterfaceContainer interfaces = ipv4.Assign(devices);
+
+    // Assign a mobility model to the remote host to set its z-position
+    MobilityHelper remoteMobility;
+    remoteMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    remoteMobility.Install(remoteHostContainer.Get(0));
+    Ptr<MobilityModel> remoteMobilityModel = remoteHostContainer.Get(0)->GetObject<MobilityModel>();
+    remoteMobilityModel->SetPosition(Vector(0.0, 0.0, 1.5)); // Set x=0, y=0, z=1.5m
+
+    // Log Remote Host position
+    Vector remotePos = remoteMobilityModel->GetPosition();
+    NS_LOG_INFO("Remote Host Position: " << remotePos);
+
+    // Assign a mobility model to the PGW node to set its z-position
+    MobilityHelper pgwMobility;
+    pgwMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    pgwMobility.Install(pgw);
+    Ptr<MobilityModel> pgwMobilityModel = pgw->GetObject<MobilityModel>();
+    pgwMobilityModel->SetPosition(Vector(0.0, 0.0, 1.5)); // Set x=0, y=0, z=1.5m
+
+    // Log PGW position
+    Vector pgwPos = pgwMobilityModel->GetPosition();
+    NS_LOG_INFO("PGW Position: " << pgwPos);
 
     // Enable PCAP tracing on the point-to-point link (remote host side)
     p2p.EnablePcap("remote-host-p2p", devices.Get(1), true); // 'true' for promiscuous mode
@@ -221,6 +279,12 @@ void InstallVoipApplications(NodeContainer &ueNodes, Ipv4Address remoteAddr, dou
     ApplicationContainer sinkApps = packetSink.Install(remoteHostContainer.Get(0));
     sinkApps.Start(Seconds(0.5));
     sinkApps.Stop(Seconds(simTime));
+
+    // Log application installation
+    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+    {
+        NS_LOG_INFO("VoIP application installed on UE " << i);
+    }
 }
 
 /**
@@ -231,6 +295,7 @@ void EnableLteTraces(Ptr<LteHelper> lteHelper)
 {
     lteHelper->EnablePhyTraces();
     lteHelper->EnableMacTraces();
+    NS_LOG_INFO("Enabled PHY and MAC traces.");
 }
 
 /**
@@ -240,7 +305,9 @@ void EnableLteTraces(Ptr<LteHelper> lteHelper)
  */
 Ptr<FlowMonitor> SetupFlowMonitor(FlowMonitorHelper &flowHelper)
 {
-    return flowHelper.InstallAll();
+    Ptr<FlowMonitor> flowMonitor = flowHelper.InstallAll();
+    NS_LOG_INFO("FlowMonitor installed.");
+    return flowMonitor;
 }
 
 /**
@@ -282,6 +349,7 @@ void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMoni
         std::ofstream plotFile(outputDir + "/throughput.plt");
         throughputPlot.GenerateOutput(plotFile);
         plotFile.close();
+        NS_LOG_INFO("Throughput plot generated.");
     }
 
     // Latency Plot
@@ -310,6 +378,7 @@ void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMoni
         std::ofstream plotFile(outputDir + "/latency.plt");
         latencyPlot.GenerateOutput(plotFile);
         plotFile.close();
+        NS_LOG_INFO("Latency plot generated.");
     }
 
     // Packet Loss Plot
@@ -338,6 +407,7 @@ void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMoni
         std::ofstream plotFile(outputDir + "/packet-loss.plt");
         lossPlot.GenerateOutput(plotFile);
         plotFile.close();
+        NS_LOG_INFO("Packet Loss plot generated.");
     }
 
     // Jitter Plot
@@ -366,8 +436,10 @@ void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMoni
         std::ofstream plotFile(outputDir + "/jitter.plt");
         jitterPlot.GenerateOutput(plotFile);
         plotFile.close();
+        NS_LOG_INFO("Jitter plot generated.");
     }
 
     // Serialize FlowMonitor results to XML
     flowMonitor->SerializeToXmlFile(outputDir + "/flowmon.xml", true, true);
+    NS_LOG_INFO("FlowMonitor results serialized to XML.");
 }
