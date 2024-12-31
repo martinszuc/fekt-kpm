@@ -1,8 +1,13 @@
 /**
  * @file lte-voip-simulation.cc
  * @brief LTE simulation with VoIP traffic, FlowMonitor, PCAP on Point-to-Point Link, and Gnuplot (ns-3.39 compatible).
+ *
  * @details Generates .plt files for throughput, latency, packet loss, and jitter metrics.
  *          Enables PCAP tracing on the point-to-point link between PGW and remote host.
+ *
+ *          This version uses:
+ *          - Cost231PropagationLossModel for suburban path loss
+ *          - RandomWaypointMobilityModel for UEs without invalid "Bounds" attribute
  */
 
 #include "ns3/core-module.h"
@@ -29,37 +34,16 @@ void InstallVoipApplications(NodeContainer &ueNodes, Ipv4Address remoteAddr, dou
 Ptr<FlowMonitor> SetupFlowMonitor(FlowMonitorHelper &flowHelper);
 void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMonitor, const std::string &outputDir);
 void EnableLteTraces(Ptr<LteHelper> lteHelper);
-void FixZPosition(Ptr<MobilityModel> mobility, double desiredZ, Vector newPos);
-
-/**
- * @brief Callback function to enforce a fixed z-position.
- * @param mobility Pointer to the MobilityModel.
- * @param desiredZ The desired z-coordinate.
- * @param newPos The new position vector.
- */
-void FixZPosition(Ptr<MobilityModel> mobility, double desiredZ, Vector newPos)
-{
-    // Log the incoming position
-    NS_LOG_INFO("FixZPosition Callback: Current Position = ("
-                << newPos.x << ", " << newPos.y << ", " << newPos.z << ")");
-
-    // Check if z is already set correctly to avoid infinite loops
-    if (newPos.z != desiredZ)
-    {
-        newPos.z = desiredZ;
-        mobility->SetPosition(newPos);
-        NS_LOG_INFO("FixZPosition Callback: z-coordinate set to " << desiredZ << " meters.");
-    }
-}
 
 /**
  * @brief Main function for LTE + VoIP simulation.
  */
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
     uint16_t numEnb = 2;
     uint16_t numUe = 5;
-    double simTime = 20.0; // Increased simulation time for better metrics observation
+    double simTime = 50.0; // Increased simulation time for better metrics observation
     std::string outputDir = "lte-voip-output";
 
     CommandLine cmd;
@@ -90,10 +74,10 @@ int main(int argc, char *argv[])
     ConfigureEnbMobility(enbNodes);
     ConfigureUeMobility(ueNodes);
 
-    // Configure Path Loss Model AFTER setting node positions
-    lteHelper->SetPathlossModelType(TypeId::LookupByName("ns3::OkumuraHataPropagationLossModel"));
-    lteHelper->SetPathlossModelAttribute("Environment", StringValue("SubUrban"));
+    // === Use Cost231PropagationLossModel (SubUrban) instead of OkumuraHata ===
+    lteHelper->SetPathlossModelType(TypeId::LookupByName("ns3::Cost231PropagationLossModel"));
     lteHelper->SetPathlossModelAttribute("Frequency", DoubleValue(1800.0));
+    // Removed invalid "Environment" attribute
 
     // Install LTE devices
     NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes);
@@ -110,6 +94,7 @@ int main(int argc, char *argv[])
     // Attach UEs to eNodeBs
     for (uint32_t i = 0; i < ueDevs.GetN(); ++i)
     {
+        // Attach each UE to an eNodeB (round-robin)
         lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(i % numEnb));
     }
 
@@ -142,7 +127,8 @@ int main(int argc, char *argv[])
 /**
  * @brief Configure logging for simulation components.
  */
-void ConfigureLogging()
+void
+ConfigureLogging()
 {
     LogComponentEnable("LTEVoipSimulation", LOG_LEVEL_INFO);
     LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);
@@ -155,7 +141,8 @@ void ConfigureLogging()
  * @brief Configure mobility for eNodeBs (fixed positions, 30m height).
  * @param enbNodes Container of eNodeB nodes.
  */
-void ConfigureEnbMobility(NodeContainer &enbNodes)
+void
+ConfigureEnbMobility(NodeContainer &enbNodes)
 {
     MobilityHelper enbMobility;
     Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
@@ -175,34 +162,38 @@ void ConfigureEnbMobility(NodeContainer &enbNodes)
 }
 
 /**
- * @brief Configure mobility for UEs with RandomWaypoint and height of 1.5m.
+ * @brief Configure mobility for UEs with RandomWaypoint, setting fixed height.
  * @param ueNodes Container of UE nodes.
  */
-void ConfigureUeMobility(NodeContainer &ueNodes)
+void
+ConfigureUeMobility(NodeContainer &ueNodes)
 {
+    // 1) Create the mobility helper
     MobilityHelper ueMobility;
+
+    // 2) Create and configure your position allocator
     Ptr<PositionAllocator> positionAlloc = CreateObject<RandomRectanglePositionAllocator>();
     positionAlloc->SetAttribute("X", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
     positionAlloc->SetAttribute("Y", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
     ueMobility.SetPositionAllocator(positionAlloc);
+
+    // 3) Configure RandomWaypoint with speed and pause
     ueMobility.SetMobilityModel("ns3::RandomWaypointMobilityModel",
                                 "Speed", StringValue("ns3::UniformRandomVariable[Min=2.0|Max=10.0]"),
                                 "Pause", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"),
                                 "PositionAllocator", PointerValue(positionAlloc));
+
+    // 4) Install the mobility model on UEs
     ueMobility.Install(ueNodes);
 
-    // Set height of UEs (Z-axis) and connect the FixZPosition callback
+    // 5) Force each UE's Z-height
     for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
     {
         Ptr<MobilityModel> mobility = ueNodes.Get(i)->GetObject<MobilityModel>();
         Vector pos = mobility->GetPosition();
-        pos.z = 1.5; // Set height to 1.5m
+        pos.z = 1.5;  // Fixed height of 1.5 meters
         mobility->SetPosition(pos);
 
-        // Connect the FixZPosition callback to ensure z remains at 1.5m
-        mobility->TraceConnectWithoutContext("Position", MakeBoundCallback(&FixZPosition, mobility, 1.5));
-
-        // Log UE positions
         NS_LOG_INFO("UE " << i << " Initial Position: " << pos);
     }
 }
@@ -214,7 +205,10 @@ void ConfigureUeMobility(NodeContainer &ueNodes)
  * @param outputDir Output directory for PCAP files.
  * @return IP address of the remote host.
  */
-Ipv4Address CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper, NodeContainer &remoteHostContainer, const std::string &outputDir)
+Ipv4Address
+CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
+                 NodeContainer &remoteHostContainer,
+                 const std::string &outputDir)
 {
     Ptr<Node> pgw = epcHelper->GetPgwNode();
     PointToPointHelper p2p;
@@ -248,8 +242,9 @@ Ipv4Address CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper, NodeContainer
     Vector pgwPos = pgwMobilityModel->GetPosition();
     NS_LOG_INFO("PGW Position: " << pgwPos);
 
-    // Enable PCAP tracing on the point-to-point link (remote host side)
-    p2p.EnablePcap("remote-host-p2p", devices.Get(1), true); // 'true' for promiscuous mode
+    // Enable PCAP tracing on both sides of the point-to-point link
+    p2p.EnablePcap("pgw-p2p", devices.Get(0), true); // PGW side
+    p2p.EnablePcap("remote-host-p2p", devices.Get(1), true); // Remote host side
 
     return interfaces.GetAddress(1); // Remote host's IP
 }
@@ -261,29 +256,34 @@ Ipv4Address CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper, NodeContainer
  * @param simTime Simulation time in seconds.
  * @param remoteHostContainer Container with the remote host node.
  */
-void InstallVoipApplications(NodeContainer &ueNodes, Ipv4Address remoteAddr, double simTime, NodeContainer &remoteHostContainer)
+void
+InstallVoipApplications(NodeContainer &ueNodes,
+                        Ipv4Address remoteAddr,
+                        double simTime,
+                        NodeContainer &remoteHostContainer)
 {
-    uint16_t port = 5000;
-    OnOffHelper onOff("ns3::UdpSocketFactory", InetSocketAddress(remoteAddr, port));
-    onOff.SetAttribute("DataRate", StringValue("64kbps"));
-    onOff.SetAttribute("PacketSize", UintegerValue(160));
-    onOff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    onOff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-
-    ApplicationContainer apps = onOff.Install(ueNodes);
-    apps.Start(Seconds(1.0));
-    apps.Stop(Seconds(simTime));
-
-    // Install a PacketSink on the remote host to receive the packets
-    PacketSinkHelper packetSink("ns3::UdpSocketFactory", InetSocketAddress(Ipv4Address::GetAny(), port));
-    ApplicationContainer sinkApps = packetSink.Install(remoteHostContainer.Get(0));
-    sinkApps.Start(Seconds(0.5));
-    sinkApps.Stop(Seconds(simTime));
-
-    // Log application installation
+    uint16_t basePort = 5000;
     for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
     {
-        NS_LOG_INFO("VoIP application installed on UE " << i);
+        uint16_t port = basePort + i;
+        OnOffHelper onOff("ns3::UdpSocketFactory", InetSocketAddress(remoteAddr, port));
+        onOff.SetAttribute("DataRate", StringValue("64kbps"));
+        onOff.SetAttribute("PacketSize", UintegerValue(160));
+        onOff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
+        onOff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+
+        ApplicationContainer apps = onOff.Install(ueNodes.Get(i));
+        apps.Start(Seconds(1.0));
+        apps.Stop(Seconds(simTime));
+
+        // Install a PacketSink on the remote host to receive the packets
+        PacketSinkHelper packetSink("ns3::UdpSocketFactory",
+                                    InetSocketAddress(Ipv4Address::GetAny(), port));
+        ApplicationContainer sinkApps = packetSink.Install(remoteHostContainer.Get(0));
+        sinkApps.Start(Seconds(0.5));
+        sinkApps.Stop(Seconds(simTime));
+
+        NS_LOG_INFO("VoIP application installed on UE " << i << " sending to port " << port);
     }
 }
 
@@ -291,7 +291,8 @@ void InstallVoipApplications(NodeContainer &ueNodes, Ipv4Address remoteAddr, dou
  * @brief Enable LTE traces (PHY and MAC layers).
  * @param lteHelper LTE helper instance.
  */
-void EnableLteTraces(Ptr<LteHelper> lteHelper)
+void
+EnableLteTraces(Ptr<LteHelper> lteHelper)
 {
     lteHelper->EnablePhyTraces();
     lteHelper->EnableMacTraces();
@@ -303,7 +304,8 @@ void EnableLteTraces(Ptr<LteHelper> lteHelper)
  * @param flowHelper FlowMonitorHelper instance.
  * @return Pointer to the installed FlowMonitor.
  */
-Ptr<FlowMonitor> SetupFlowMonitor(FlowMonitorHelper &flowHelper)
+Ptr<FlowMonitor>
+SetupFlowMonitor(FlowMonitorHelper &flowHelper)
 {
     Ptr<FlowMonitor> flowMonitor = flowHelper.InstallAll();
     NS_LOG_INFO("FlowMonitor installed.");
@@ -316,13 +318,16 @@ Ptr<FlowMonitor> SetupFlowMonitor(FlowMonitorHelper &flowHelper)
  * @param flowMonitor Pointer to the installed FlowMonitor.
  * @param outputDir Output directory to save the .plt files.
  */
-void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMonitor, const std::string &outputDir)
+void
+AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
+                   Ptr<FlowMonitor> flowMonitor,
+                   const std::string &outputDir)
 {
     flowMonitor->CheckForLostPackets();
     Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
     FlowMonitor::FlowStatsContainer stats = flowMonitor->GetFlowStats();
 
-    // Throughput Plot
+    // === Throughput Plot ===
     {
         Gnuplot throughputPlot(outputDir + "/throughput.plt");
         throughputPlot.SetTitle("Throughput vs. Flow ID");
@@ -352,7 +357,7 @@ void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMoni
         NS_LOG_INFO("Throughput plot generated.");
     }
 
-    // Latency Plot
+    // === Latency Plot ===
     {
         Gnuplot latencyPlot(outputDir + "/latency.plt");
         latencyPlot.SetTitle("Latency vs. Flow ID");
@@ -381,7 +386,7 @@ void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMoni
         NS_LOG_INFO("Latency plot generated.");
     }
 
-    // Packet Loss Plot
+    // === Packet Loss Plot ===
     {
         Gnuplot lossPlot(outputDir + "/packet-loss.plt");
         lossPlot.SetTitle("Packet Loss vs. Flow ID");
@@ -397,7 +402,8 @@ void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMoni
             double lossRate = 0.0;
             if (iter.second.txPackets > 0)
             {
-                lossRate = ((double)(iter.second.txPackets - iter.second.rxPackets) / iter.second.txPackets) * 100.0;
+                lossRate = ((double)(iter.second.txPackets - iter.second.rxPackets) /
+                            iter.second.txPackets) * 100.0;
             }
             dataset.Add(flowId, lossRate);
             flowId++;
@@ -410,7 +416,7 @@ void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMoni
         NS_LOG_INFO("Packet Loss plot generated.");
     }
 
-    // Jitter Plot
+    // === Jitter Plot ===
     {
         Gnuplot jitterPlot(outputDir + "/jitter.plt");
         jitterPlot.SetTitle("Jitter vs. Flow ID");
@@ -424,7 +430,7 @@ void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMoni
         for (auto &iter : stats)
         {
             double avgJitter = 0.0;
-            if (iter.second.jitterSum.GetSeconds() > 0)
+            if (iter.second.rxPackets > 0)
             {
                 avgJitter = iter.second.jitterSum.GetSeconds() / iter.second.rxPackets;
             }
