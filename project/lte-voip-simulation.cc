@@ -1,6 +1,6 @@
 /**
- * @file lte-udp-simulation.cc
- * @brief LTE simulation with simple UDP echo traffic, FlowMonitor, PCAP, and Gnuplot
+ * @file lte-voip-simulation.cc
+ * @brief LTE simulation with VoIP traffic, FlowMonitor, PCAP, and Gnuplot (compatible with ns-3.39).
  */
 
 #include "ns3/core-module.h"
@@ -15,30 +15,29 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("LTEUdpSimulation");
+NS_LOG_COMPONENT_DEFINE("LTEVoipSimulation");
 
 /**
- * @brief Configure logging.
+ * @brief Configure logging levels.
  */
 void ConfigureLogging()
 {
-    LogComponentEnable("LTEUdpSimulation", LOG_LEVEL_INFO);
-    LogComponentEnable("UdpEchoClientApplication", LOG_LEVEL_INFO);
-    LogComponentEnable("UdpEchoServerApplication", LOG_LEVEL_INFO);
+  LogComponentEnable("LTEVoipSimulation", LOG_LEVEL_INFO);
+  LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);
 }
 
 /**
- * @brief Configure eNodeB mobility (fixed).
+ * @brief Configure eNodeB mobility (fixed positions).
  */
 void ConfigureEnbMobility(NodeContainer &enbNodes)
 {
-    MobilityHelper enbMobility;
-    Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
-    posAlloc->Add(Vector(0.0, 100.0, 0.0));   // eNodeB 0
-    posAlloc->Add(Vector(500.0, 100.0, 0.0)); // eNodeB 1
-    enbMobility.SetPositionAllocator(posAlloc);
-    enbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-    enbMobility.Install(enbNodes);
+  MobilityHelper enbMobility;
+  Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
+  posAlloc->Add(Vector(0.0, 100.0, 30.0));   // eNodeB 0 at 30m height
+  posAlloc->Add(Vector(500.0, 100.0, 30.0)); // eNodeB 1 at 30m height
+  enbMobility.SetPositionAllocator(posAlloc);
+  enbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+  enbMobility.Install(enbNodes);
 }
 
 /**
@@ -46,204 +45,209 @@ void ConfigureEnbMobility(NodeContainer &enbNodes)
  */
 void ConfigureUeMobility(NodeContainer &ueNodes)
 {
-    MobilityHelper ueMobility;
-    Ptr<PositionAllocator> positionAlloc = CreateObject<RandomRectanglePositionAllocator>();
-    positionAlloc->SetAttribute("X", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
-    positionAlloc->SetAttribute("Y", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
+  MobilityHelper ueMobility;
+  Ptr<PositionAllocator> positionAlloc = CreateObject<RandomRectanglePositionAllocator>();
+  positionAlloc->SetAttribute("X", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
+  positionAlloc->SetAttribute("Y", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
 
-    ueMobility.SetPositionAllocator(positionAlloc);
-    ueMobility.SetMobilityModel("ns3::RandomWaypointMobilityModel",
-                                "Speed", StringValue("ns3::UniformRandomVariable[Min=2.0|Max=10.0]"),
-                                "Pause", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"),
-                                "PositionAllocator", PointerValue(positionAlloc));
-    ueMobility.Install(ueNodes);
+  ueMobility.SetPositionAllocator(positionAlloc);
+  ueMobility.SetMobilityModel("ns3::RandomWaypointMobilityModel",
+                              "Speed", StringValue("ns3::UniformRandomVariable[Min=2.0|Max=10.0]"),
+                              "Pause", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"),
+                              "PositionAllocator", PointerValue(positionAlloc));
+  ueMobility.Install(ueNodes);
+
+  // Set height of UEs (Z-axis)
+  for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+  {
+    Ptr<MobilityModel> mobility = ueNodes.Get(i)->GetObject<MobilityModel>();
+    Vector position = mobility->GetPosition();
+    position.z = 1.5; // Set height to 1.5m
+    mobility->SetPosition(position);
+  }
 }
+
 
 /**
  * @brief Create and connect a remote host to the PGW via a point-to-point link.
  */
 Ipv4Address CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper, NodeContainer &remoteHostContainer)
 {
-    // PGW node
-    Ptr<Node> pgw = epcHelper->GetPgwNode();
+  // PGW node
+  Ptr<Node> pgw = epcHelper->GetPgwNode();
 
-    // Create P2P link
-    PointToPointHelper p2p;
-    p2p.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
-    p2p.SetChannelAttribute("Delay", StringValue("10ms"));
+  // Create point-to-point link between remote host and PGW
+  PointToPointHelper p2p;
+  p2p.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
+  p2p.SetChannelAttribute("Delay", StringValue("10ms"));
 
-    NetDeviceContainer devices = p2p.Install(pgw, remoteHostContainer.Get(0));
+  NetDeviceContainer devices = p2p.Install(pgw, remoteHostContainer.Get(0));
 
-    // Assign IP
-    Ipv4AddressHelper ipv4;
-    ipv4.SetBase("2.0.0.0", "255.255.255.0");
-    Ipv4InterfaceContainer interfaces = ipv4.Assign(devices);
+  // Assign IP
+  Ipv4AddressHelper ipv4;
+  ipv4.SetBase("1.0.0.0", "255.255.255.0");
+  Ipv4InterfaceContainer interfaces = ipv4.Assign(devices);
 
-    // Return the IP assigned to remote host
-    return interfaces.GetAddress(1);
+  return interfaces.GetAddress(1); // the remote host's IP
 }
 
 /**
- * @brief Install UDP Echo applications on UEs sending to remote host.
+ * @brief Install VoIP-like OnOff applications on UEs to send traffic to the remote host.
  */
-void InstallUdpApplications(NodeContainer &ueNodes, Ipv4Address remoteAddr, double simTime)
+void InstallVoipApplications(NodeContainer &ueNodes, Ipv4Address remoteAddr, double simTime)
 {
-    // UDP Echo Server on remote host side
-    // (We are only using the IP address here for demonstration,
-    //  in a real setup, you might also install InternetStack on the remote host
-    //  and place the server app there. For simplicity, let's just show the client side.)
-    uint16_t port = 9;
+  uint16_t port = 5000; // Destination port
+  OnOffHelper onOff("ns3::UdpSocketFactory", InetSocketAddress(remoteAddr, port));
+  // Typical voice/VoIP parameters
+  onOff.SetAttribute("DataRate", StringValue("64kbps"));
+  onOff.SetAttribute("PacketSize", UintegerValue(160));
+  onOff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
+  onOff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
 
-    // Typically you'd install the UdpEchoServer on the actual remote host node:
-    // UdpEchoServerHelper echoServer(port);
-    // ApplicationContainer serverApps = echoServer.Install(remoteHost);
-    // serverApps.Start(Seconds(0.5));
-    // serverApps.Stop(Seconds(simTime));
+  // Install on all UEs
+  ApplicationContainer apps = onOff.Install(ueNodes);
+  apps.Start(Seconds(1.0));
+  apps.Stop(Seconds(simTime));
 
-    // For demonstration, let's install the echo server on the first UE (not typical):
-    UdpEchoServerHelper echoServer(port);
-    ApplicationContainer serverApps = echoServer.Install(ueNodes.Get(0));
-    serverApps.Start(Seconds(0.5));
-    serverApps.Stop(Seconds(simTime));
+  // If desired, also install a sink (UdpServer or PacketSink) on the remote host
+  // to receive these packets. But since it's "the Internet," we'll keep it simple.
+}
 
-    // Echo client on the remaining UEs
-    for (uint32_t i = 1; i < ueNodes.GetN(); ++i)
+/**
+ * @brief Enable FlowMonitor to collect throughput, delay, packet loss, etc.
+ */
+Ptr<FlowMonitor> SetupFlowMonitor(FlowMonitorHelper &flowHelper)
+{
+  Ptr<FlowMonitor> flowMonitor = flowHelper.InstallAll();
+  return flowMonitor;
+}
+
+/**
+ * @brief Write FlowMonitor stats to file and optionally plot with Gnuplot.
+ */
+void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMonitor, std::string filePrefix)
+{
+  flowMonitor->CheckForLostPackets();
+
+  // Instead of flowMonitor->GetClassifier(), we use flowHelper.GetClassifier()
+  Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+  FlowMonitor::FlowStatsContainer stats = flowMonitor->GetFlowStats();
+
+  // Write to .flowmon file
+  flowMonitor->SerializeToXmlFile(filePrefix + ".flowmon", true, true);
+
+  // Example Gnuplot for throughput
+  Gnuplot gnuplot(filePrefix + "-throughput.png");
+  gnuplot.SetTitle("Throughput vs. Flow ID");
+  gnuplot.SetTerminal("png");
+  gnuplot.SetLegend("Flow ID", "Throughput (bps)");
+  Gnuplot2dDataset dataset;
+  dataset.SetStyle(Gnuplot2dDataset::POINTS);
+
+  for (auto &iter : stats)
+  {
+    double timeFirstTx = iter.second.timeFirstTxPacket.GetSeconds();
+    double timeLastRx  = iter.second.timeLastRxPacket.GetSeconds();
+    double throughputBps = 0.0;
+    if (timeLastRx - timeFirstTx > 0)
     {
-        UdpEchoClientHelper echoClient(InetSocketAddress(remoteAddr, port));
-        echoClient.SetAttribute("MaxPackets", UintegerValue(1000));
-        echoClient.SetAttribute("Interval", TimeValue(Seconds(0.05)));
-        echoClient.SetAttribute("PacketSize", UintegerValue(512));
-
-        ApplicationContainer clientApps = echoClient.Install(ueNodes.Get(i));
-        clientApps.Start(Seconds(1.0));
-        clientApps.Stop(Seconds(simTime));
+      throughputBps = (iter.second.rxBytes * 8.0) / (timeLastRx - timeFirstTx);
     }
+    dataset.Add(iter.first, throughputBps);
+  }
+
+  gnuplot.AddDataset(dataset);
+  std::ofstream plotFile(filePrefix + "-throughput.plt");
+  gnuplot.GenerateOutput(plotFile);
+  plotFile.close();
 }
 
 /**
- * @brief Enable FlowMonitor to collect network statistics.
- */
-Ptr<FlowMonitor> SetupFlowMonitor()
-{
-    FlowMonitorHelper flowHelper;
-    Ptr<FlowMonitor> flowMonitor = flowHelper.InstallAll();
-    return flowMonitor;
-}
-
-/**
- * @brief Analyze FlowMonitor results and create Gnuplot.
- */
-void AnalyzeFlowMonitor(Ptr<FlowMonitor> flowMonitor, std::string filePrefix)
-{
-    flowMonitor->CheckForLostPackets();
-
-    Ptr<Ipv4FlowClassifier> classifier =
-        DynamicCast<Ipv4FlowClassifier>(flowMonitor->GetClassifier());
-    FlowMonitor::FlowStatsContainer stats = flowMonitor->GetFlowStats();
-
-    // Save .flowmon file
-    flowMonitor->SerializeToXmlFile(filePrefix + ".flowmon", true, true);
-
-    // Example Gnuplot
-    Gnuplot gnuplot(filePrefix + "-throughput.png");
-    gnuplot.SetTitle("UDP Throughput vs. Flow ID");
-    gnuplot.SetTerminal("png");
-    gnuplot.SetLegend("Flow ID", "Throughput (bps)");
-    Gnuplot2dDataset dataset;
-    dataset.SetStyle(Gnuplot2dDataset::POINTS);
-
-    for (auto iter = stats.begin(); iter != stats.end(); ++iter)
-    {
-        double throughputBps = (iter->second.rxBytes * 8.0) /
-                               (iter->second.timeLastRxPacket.GetSeconds() - iter->second.timeFirstTxPacket.GetSeconds());
-        dataset.Add(iter->first, throughputBps);
-    }
-
-    gnuplot.AddDataset(dataset);
-    std::ofstream plotFile(filePrefix + "-throughput.plt");
-    gnuplot.GenerateOutput(plotFile);
-    plotFile.close();
-}
-
-/**
- * @brief Main function for LTE + UDP Echo simulation.
+ * @brief Main function for LTE + VoIP simulation.
  */
 int main(int argc, char *argv[])
 {
-    uint16_t numEnb = 2;
-    uint16_t numUe = 5;
-    double simTime = 10.0;
-    std::string outputDir = "lte-udp-output";
+  uint16_t numEnb = 2;
+  uint16_t numUe = 5;
+  double simTime = 10.0; // seconds
+  std::string outputDir = "lte-voip-output";
 
-    CommandLine cmd;
-    cmd.AddValue("numEnb", "Number of eNodeBs", numEnb);
-    cmd.AddValue("numUe", "Number of UEs", numUe);
-    cmd.AddValue("simTime", "Simulation time (s)", simTime);
-    cmd.AddValue("outputDir", "Output directory", outputDir);
-    cmd.Parse(argc, argv);
+  CommandLine cmd;
+  cmd.AddValue("numEnb", "Number of eNodeBs", numEnb);
+  cmd.AddValue("numUe", "Number of UEs", numUe);
+  cmd.AddValue("simTime", "Simulation time (s)", simTime);
+  cmd.AddValue("outputDir", "Directory to save output files", outputDir);
+  cmd.Parse(argc, argv);
 
-    ConfigureLogging();
+  // Optional: create directory
+  system(("mkdir -p " + outputDir).c_str());
 
-    // Create nodes
-    NodeContainer enbNodes;
-    enbNodes.Create(numEnb);
-    NodeContainer ueNodes;
-    ueNodes.Create(numUe);
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
+  ConfigureLogging();
 
-    // LTE & EPC
-    Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
-    Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
-    lteHelper->SetEpcHelper(epcHelper);
+  // Create nodes
+  NodeContainer enbNodes;
+  enbNodes.Create(numEnb);
 
-    // Set a suburban path loss model
-    lteHelper->SetPathlossModelType("ns3::OkumuraHataPropagationLossModel");
-    lteHelper->SetPathlossModelAttribute("Environment", StringValue("Suburban"));
-    lteHelper->SetPathlossModelAttribute("Frequency", DoubleValue(1800.0));
+  NodeContainer ueNodes;
+  ueNodes.Create(numUe);
 
-    // Mobility
-    ConfigureEnbMobility(enbNodes);
-    ConfigureUeMobility(ueNodes);
+  NodeContainer remoteHostContainer;
+  remoteHostContainer.Create(1);
 
-    // Install Devices
-    NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes);
-    NetDeviceContainer ueDevs = lteHelper->InstallUeDevice(ueNodes);
+  // Create LTE & EPC helpers
+  Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
+  Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
+  lteHelper->SetEpcHelper(epcHelper);
 
-    // Internet stack on UEs & Remote
-    InternetStackHelper internet;
-    internet.Install(ueNodes);
-    internet.Install(remoteHostContainer);
+  // Use a Suburban OkumuraHata path loss model
+  // Must use TypeId::LookupByName in older ns-3
+  lteHelper->SetPathlossModelType(TypeId::LookupByName("ns3::OkumuraHataPropagationLossModel"));
+  lteHelper->SetPathlossModelAttribute("Environment", StringValue("SubUrban"));
+  lteHelper->SetPathlossModelAttribute("Frequency", DoubleValue(1800.0));
 
-    // Assign IP addresses to UEs
-    epcHelper->AssignUeIpv4Address(ueDevs);
+  // Configure Mobility
+  ConfigureEnbMobility(enbNodes);
+  ConfigureUeMobility(ueNodes);
 
-    // Attach UEs to eNB
-    for (uint32_t i = 0; i < ueDevs.GetN(); ++i)
-    {
-        lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(i % numEnb));
-    }
+  // Install LTE devices
+  NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes);
+  NetDeviceContainer ueDevs  = lteHelper->InstallUeDevice(ueNodes);
 
-    // Create remote host link
-    Ipv4Address remoteHostAddr = CreateRemoteHost(epcHelper, remoteHostContainer);
+  // Install Internet stack on UEs and remote host
+  InternetStackHelper internet;
+  internet.Install(ueNodes);
+  internet.Install(remoteHostContainer);
 
-    // Install UDP echo applications
-    InstallUdpApplications(ueNodes, remoteHostAddr, simTime);
+  // Assign IP addresses to UEs
+  epcHelper->AssignUeIpv4Address(ueDevs);
 
-    // Enable PCAP
-    lteHelper->EnableTraces();
+  // Attach UEs to eNodeBs
+  for (uint32_t i = 0; i < ueDevs.GetN(); ++i)
+  {
+    lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(i % numEnb));
+  }
 
-    // FlowMonitor
-    Ptr<FlowMonitor> flowMonitor = SetupFlowMonitor();
+  // Create remote host link and retrieve IP
+  Ipv4Address remoteHostAddr = CreateRemoteHost(epcHelper, remoteHostContainer);
 
-    // Run simulation
-    Simulator::Stop(Seconds(simTime));
-    Simulator::Run();
+  // Install VoIP apps on UEs sending to remote host
+  InstallVoipApplications(ueNodes, remoteHostAddr, simTime);
 
-    // Analyze results
-    AnalyzeFlowMonitor(flowMonitor, outputDir + "/udp-stats");
+  // Enable PCAP
+  lteHelper->EnableTraces();
 
-    Simulator::Destroy();
-    NS_LOG_INFO("UDP simulation finished!");
-    return 0;
+  // FlowMonitor setup
+  FlowMonitorHelper flowHelper;
+  Ptr<FlowMonitor> flowMonitor = SetupFlowMonitor(flowHelper);
+
+  // Run simulation
+  Simulator::Stop(Seconds(simTime));
+  Simulator::Run();
+
+  // Collect & analyze FlowMonitor stats
+  AnalyzeFlowMonitor(flowHelper, flowMonitor, outputDir + "/voip-stats");
+
+  Simulator::Destroy();
+  NS_LOG_INFO("VoIP simulation finished!");
+  return 0;
 }
