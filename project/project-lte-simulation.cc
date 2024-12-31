@@ -62,12 +62,14 @@ int main(int argc, char *argv[]) {
 
     // UE Mobility
     MobilityHelper ueMobility;
-    ueMobility.SetPositionAllocator("ns3::RandomRectanglePositionAllocator",
-                                    "X", StringValue("ns3::UniformRandomVariable[Min=0|Max=500]"),
-                                    "Y", StringValue("ns3::UniformRandomVariable[Min=0|Max=500]"));
+    Ptr<PositionAllocator> uePositionAlloc = CreateObject<RandomRectanglePositionAllocator>();
+    uePositionAlloc->SetAttribute("X", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
+    uePositionAlloc->SetAttribute("Y", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=500.0]"));
+    ueMobility.SetPositionAllocator(uePositionAlloc);
     ueMobility.SetMobilityModel("ns3::RandomWaypointMobilityModel",
                                 "Speed", StringValue("ns3::UniformRandomVariable[Min=2.0|Max=10.0]"),
-                                "Pause", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"));
+                                "Pause", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"),
+                                "PositionAllocator", PointerValue(uePositionAlloc));
     ueMobility.Install(ueNodes);
 
     // Install LTE Devices
@@ -95,14 +97,9 @@ int main(int argc, char *argv[]) {
     Ipv4InterfaceContainer internetIfaces = ipv4Helper.Assign(internetDevices);
 
     // Set default route on remoteHost
-    // 1) Get Ipv4 pointer from remoteHost
-    Ptr<Ipv4> remoteHostIpv4 = remoteHost->GetObject<Ipv4>();
-    // 2) Get the Ipv4RoutingProtocol from that Ipv4
-    Ptr<Ipv4RoutingProtocol> rhRoutingProtocol = remoteHostIpv4->GetRoutingProtocol();
-    // 3) Ask Ipv4RoutingHelper for the Ipv4StaticRouting interface
     Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        Ipv4RoutingHelper::GetRouting<Ipv4StaticRouting>(rhRoutingProtocol);
-    // 4) Add route to reach the UE network
+        Ipv4RoutingHelper::GetRouting<Ipv4StaticRouting>(
+            remoteHost->GetObject<Ipv4>()->GetRoutingProtocol());
     remoteHostStaticRouting->AddNetworkRouteTo(
         Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), // UE network
         internetIfaces.GetAddress(1),                 // Next hop
