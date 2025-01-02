@@ -50,7 +50,8 @@ void ManualHandoverCheck(Ptr<LteHelper> lteHelper, NodeContainer ueNodes, NodeCo
 void NotifyUeAttached(std::string context, uint64_t imsi, uint16_t cellId, uint16_t rnti);
 void NotifyPacketDrop(std::string context, Ptr<const Packet> packet);
 void NotifyRrcStateChange(std::string context, uint64_t imsi, uint16_t cellId,
-                          uint16_t rnti, uint8_t oldState, uint8_t newState);
+                          uint16_t rnti, ns3::LteUeRrc::State oldState,
+                          ns3::LteUeRrc::State newState);
 void LogUePositions(NodeContainer &ueNodes);
 
 int
@@ -90,12 +91,16 @@ main(int argc, char *argv[])
   Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
   lteHelper->SetEpcHelper(epcHelper);
 
-  // Set the pathloss model via TypeId
   lteHelper->SetPathlossModelType(TypeId::LookupByName("ns3::Cost231PropagationLossModel"));
-  // Enable shadowing
-  lteHelper->SetAttribute("ShadowingEnabled", BooleanValue(true));
-  // Enable fading
+  lteHelper->SetPathlossModelAttribute("Frequency", DoubleValue(1800.0)); // Frequency in MHz
+
+  // Enable fading (Optional: Remove if not needed)
   lteHelper->SetFadingModel("ns3::TraceFadingLossModel");
+  lteHelper->SetFadingModelAttribute("TraceFilename", StringValue("src/lte/model/fading-traces/fading_trace_EPA_3kmph.fad"));
+  lteHelper->SetFadingModelAttribute("TraceLength", TimeValue(Seconds(10.0)));
+  lteHelper->SetFadingModelAttribute("SamplesNum", UintegerValue(10000));
+  lteHelper->SetFadingModelAttribute("WindowSize", TimeValue(MilliSeconds(100.0)));
+  lteHelper->SetFadingModelAttribute("RbNum", UintegerValue(25));
 
   // Configure mobility
   ConfigureEnbMobility(enbNodes);
@@ -122,14 +127,6 @@ main(int argc, char *argv[])
   // Create remote host link
   Ipv4Address remoteHostAddr = CreateRemoteHost(epcHelper, remoteHostContainer, outputDir);
 
-  // Use TrafficControlHelper on LTE NetDevices
-  TrafficControlHelper tch;
-  tch.SetRootQueueDisc("ns3::FqCoDelQueueDisc");
-  NetDeviceContainer allLteDevices;
-  allLteDevices.Add(enbDevs);
-  allLteDevices.Add(ueDevs);
-  tch.Install(allLteDevices); // Correct usage
-
   // Install VoIP apps
   InstallVoipApplications(ueNodes, remoteHostAddr, simTime, remoteHostContainer);
 
@@ -150,11 +147,8 @@ main(int argc, char *argv[])
   Config::Connect("/NodeList/*/DeviceList/*/LteUeRrc/ConnectionEstablished",
                   MakeCallback(&NotifyUeAttached));
   Config::Connect("/NodeList/*/DeviceList/*/LteUeRrc/StateTransition",
-                  MakeCallback(&NotifyRrcStateChange));
-  Config::Connect("/NodeList/*/DeviceList/*/Phy/PhyRxDrop",
-                  MakeCallback(&NotifyPacketDrop));
-  Config::Connect("/NodeList/*/DeviceList/*/Mac/MacRxDrop",
-                  MakeCallback(&NotifyPacketDrop));
+                  MakeCallback<void, std::string, uint64_t, uint16_t, uint16_t, ns3::LteUeRrc::State, ns3::LteUeRrc::State>(
+                      &NotifyRrcStateChange));
 
   // Schedule stats updates
   Simulator::Schedule(Seconds(g_statsInterval), &PeriodicStatsUpdate, flowMonitor, std::ref(flowHelper));
@@ -511,16 +505,20 @@ NotifyPacketDrop(std::string context, Ptr<const Packet> packet)
               << " time " << Simulator::Now().GetSeconds() << "s");
 }
 
-// RRC state transition callback
-void
-NotifyRrcStateChange(std::string context, uint64_t imsi, uint16_t cellId,
-                     uint16_t rnti, uint8_t oldState, uint8_t newState)
+/**
+ * RRC state transition callback
+ */
+void NotifyRrcStateChange(std::string context, uint64_t imsi, uint16_t cellId,
+                          uint16_t rnti, ns3::LteUeRrc::State oldState,
+                          ns3::LteUeRrc::State newState)
 {
-  NS_LOG_INFO("UE IMSI=" << imsi << " RNTI=" << rnti
-              << " from RRC " << (unsigned)oldState
-              << " to " << (unsigned)newState
-              << " in cell " << cellId << " at "
-              << Simulator::Now().GetSeconds() << "s");
+    NS_LOG_INFO("UE IMSI=" << imsi
+                << " RNTI=" << rnti
+                << " transitioned from RRC state "
+                << (unsigned)oldState
+                << " to " << (unsigned)newState
+                << " in Cell " << cellId
+                << " at time " << Simulator::Now().GetSeconds() << "s");
 }
 
 // Periodic UE positions logging
@@ -614,13 +612,17 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
     }
     plot.AddDataset(dataset);
 
+    // Manually set the output to a PNG file within the .plt file
     std::ofstream plotFile(outputDir + "/time-series-throughput.plt");
+    plotFile << "set terminal png\n";
+    plotFile << "set output \"" << outputDir << "/time-series-throughput.png\"\n";
     plot.GenerateOutput(plotFile);
     plotFile.close();
     NS_LOG_INFO("Time-series throughput plot generated.");
   }
 
-  // Time-series latency plot
+
+    // Time-series latency plot
   {
     Gnuplot plot(outputDir + "/time-series-latency.plt");
     plot.SetTitle("Time-Series Avg Latency");
@@ -636,13 +638,17 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
     }
     plot.AddDataset(dataset);
 
+    // Manually set the output to a PNG file within the .plt file
     std::ofstream plotFile(outputDir + "/time-series-latency.plt");
+    plotFile << "set terminal png\n";
+    plotFile << "set output \"" << outputDir << "/time-series-latency.png\"\n";
     plot.GenerateOutput(plotFile);
     plotFile.close();
     NS_LOG_INFO("Time-series latency plot generated.");
   }
 
-  // CDF: Latency
+
+    // CDF: Latency
   {
     std::sort(latencyValues.begin(), latencyValues.end());
     Gnuplot plot(outputDir + "/cdf-latency.plt");
@@ -659,13 +665,18 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
       dataset.Add(latencyValues[i], percent);
     }
     plot.AddDataset(dataset);
+
+    // Manually set the output to a PNG file within the .plt file
     std::ofstream plotFile(outputDir + "/cdf-latency.plt");
+    plotFile << "set terminal png\n";
+    plotFile << "set output \"" << outputDir << "/cdf-latency.png\"\n";
     plot.GenerateOutput(plotFile);
     plotFile.close();
     NS_LOG_INFO("CDF for latency generated.");
   }
 
-  // CDF: Jitter
+
+    // CDF: Jitter
   {
     std::sort(jitterValues.begin(), jitterValues.end());
     Gnuplot plot(outputDir + "/cdf-jitter.plt");
@@ -682,7 +693,11 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
       dataset.Add(jitterValues[i], percent);
     }
     plot.AddDataset(dataset);
+
+    // Manually set the output to a PNG file within the .plt file
     std::ofstream plotFile(outputDir + "/cdf-jitter.plt");
+    plotFile << "set terminal png\n";
+    plotFile << "set output \"" << outputDir << "/cdf-jitter.png\"\n";
     plot.GenerateOutput(plotFile);
     plotFile.close();
     NS_LOG_INFO("CDF for jitter generated.");
