@@ -1,10 +1,12 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /**
- * @file lte-voip-simulation.cc
- * @brief LTE + VoIP simulation for ns-3.39 with various requested enhancements.
+ * @file enhanced-lte-voip-simulation.cc
+ * @brief Enhanced LTE + VoIP simulation for ns-3.39 with various requested enhancements.
  *
- * Key Fix for ns-3.39:
- * - Adjust manual handover to use LteHelper::HandoverRequest(Time, UEdev, sourceEnbDev, targetCellId)
+ * This version fixes compilation issues:
+ *  - Correct usage of HandoverRequest.
+ *  - Proper usage of TrafficControlHelper.
+ *  - Removal of unused variables.
  */
 
 #include "ns3/core-module.h"
@@ -38,7 +40,7 @@ void ConfigureEnbMobility(NodeContainer &enbNodes);
 void ConfigureUeMobility(NodeContainer &ueNodes, double areaSize);
 Ipv4Address CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper, NodeContainer &remoteHostContainer, const std::string &outputDir);
 void InstallVoipApplications(NodeContainer &ueNodes, Ipv4Address remoteAddr, double simTime, NodeContainer &remoteHostContainer);
-void InstallBackgroundTraffic(NodeContainer &ueNodes, Ipv4Address remoteAddr, double simTime);
+void InstallBackgroundTraffic(NodeContainer &ueNodes, Ipv4Address remoteAddr, double simTime, NodeContainer &remoteHostContainer);
 Ptr<FlowMonitor> SetupFlowMonitor(FlowMonitorHelper &flowHelper);
 void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMonitor, const std::string &outputDir, double simTime);
 void EnableLteTraces(Ptr<LteHelper> lteHelper);
@@ -72,7 +74,7 @@ main(int argc, char *argv[])
   cmd.Parse(argc, argv);
 
   // Create output directory (ignore return value)
-  (void) system(("mkdir -p " + outputDir).c_str());
+  (void)system(("mkdir -p " + outputDir).c_str());
 
   // Configure logging
   ConfigureLogging();
@@ -90,8 +92,9 @@ main(int argc, char *argv[])
 
   // Set the pathloss model via TypeId
   lteHelper->SetPathlossModelType(TypeId::LookupByName("ns3::Cost231PropagationLossModel"));
-  // Example shadowing/fading usage
+  // Enable shadowing
   lteHelper->SetAttribute("ShadowingEnabled", BooleanValue(true));
+  // Enable fading
   lteHelper->SetFadingModel("ns3::TraceFadingLossModel");
 
   // Configure mobility
@@ -112,9 +115,9 @@ main(int argc, char *argv[])
 
   // Attach UEs to eNBs
   for (uint32_t i = 0; i < ueDevs.GetN(); ++i)
-    {
-      lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(i % numEnb));
-    }
+  {
+    lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(i % numEnb));
+  }
 
   // Create remote host link
   Ipv4Address remoteHostAddr = CreateRemoteHost(epcHelper, remoteHostContainer, outputDir);
@@ -125,16 +128,16 @@ main(int argc, char *argv[])
   NetDeviceContainer allLteDevices;
   allLteDevices.Add(enbDevs);
   allLteDevices.Add(ueDevs);
-  tch.Install(allLteDevices);
+  tch.Install(allLteDevices); // Correct usage
 
   // Install VoIP apps
   InstallVoipApplications(ueNodes, remoteHostAddr, simTime, remoteHostContainer);
 
   // Optionally install background traffic
   if (enableBackgroundTraffic)
-    {
-      InstallBackgroundTraffic(ueNodes, remoteHostAddr, simTime);
-    }
+  {
+    InstallBackgroundTraffic(ueNodes, remoteHostAddr, simTime, remoteHostContainer);
+  }
 
   // Enable LTE traces
   EnableLteTraces(lteHelper);
@@ -162,7 +165,7 @@ main(int argc, char *argv[])
   // Schedule manual handover checks
   Simulator::Schedule(Seconds(1.0), &ManualHandoverCheck, lteHelper, ueNodes, enbNodes);
 
-  // Run
+  // Run simulation
   Simulator::Stop(Seconds(simTime));
   Simulator::Run();
 
@@ -201,11 +204,11 @@ ConfigureEnbMobility(NodeContainer &enbNodes)
   enbMobility.Install(enbNodes);
 
   for (uint32_t i = 0; i < enbNodes.GetN(); ++i)
-    {
-      Ptr<MobilityModel> mobility = enbNodes.Get(i)->GetObject<MobilityModel>();
-      Vector pos = mobility->GetPosition();
-      NS_LOG_INFO("eNodeB " << i << " Position: " << pos);
-    }
+  {
+    Ptr<MobilityModel> mobility = enbNodes.Get(i)->GetObject<MobilityModel>();
+    Vector pos = mobility->GetPosition();
+    NS_LOG_INFO("eNodeB " << i << " Position: " << pos);
+  }
 }
 
 // UE Mobility
@@ -228,20 +231,20 @@ ConfigureUeMobility(NodeContainer &ueNodes, double areaSize)
 
   // Clamp positions in [0..areaSize, 0..areaSize], set z=1.5
   for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+  {
+    Ptr<MobilityModel> mobility = ueNodes.Get(i)->GetObject<MobilityModel>();
+    Vector pos = mobility->GetPosition();
+    if (pos.x < 0.0 || pos.x > areaSize || pos.y < 0.0 || pos.y > areaSize)
     {
-      Ptr<MobilityModel> mobility = ueNodes.Get(i)->GetObject<MobilityModel>();
-      Vector pos = mobility->GetPosition();
-      if (pos.x < 0.0 || pos.x > areaSize || pos.y < 0.0 || pos.y > areaSize)
-        {
-          NS_LOG_WARN("UE " << i << " assigned out-of-bounds (" << pos.x << "," << pos.y << "). Clamping.");
-          pos.x = std::max(0.0, std::min(pos.x, areaSize));
-          pos.y = std::max(0.0, std::min(pos.y, areaSize));
-        }
-      pos.z = 1.5;
-      mobility->SetPosition(pos);
-
-      NS_LOG_INFO("UE " << i << " Initial Position: " << pos);
+      NS_LOG_WARN("UE " << i << " assigned out-of-bounds (" << pos.x << "," << pos.y << "). Clamping.");
+      pos.x = std::max(0.0, std::min(pos.x, areaSize));
+      pos.y = std::max(0.0, std::min(pos.y, areaSize));
     }
+    pos.z = 1.5;
+    mobility->SetPosition(pos);
+
+    NS_LOG_INFO("UE " << i << " Initial Position: " << pos);
+  }
 }
 
 // Remote Host + PGW link
@@ -279,7 +282,7 @@ CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
   return interfaces.GetAddress(1);
 }
 
-// VoIP Apps
+// VoIP Applications
 void
 InstallVoipApplications(NodeContainer &ueNodes,
                         Ipv4Address remoteAddr,
@@ -288,38 +291,41 @@ InstallVoipApplications(NodeContainer &ueNodes,
 {
   uint16_t basePort = 5000;
   for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
-    {
-      uint16_t port = basePort + i;
-      OnOffHelper onOff("ns3::UdpSocketFactory", InetSocketAddress(remoteAddr, port));
-      onOff.SetAttribute("DataRate", StringValue("64kbps"));
-      onOff.SetAttribute("PacketSize", UintegerValue(160));
-      onOff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-      onOff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+  {
+    uint16_t port = basePort + i;
+    OnOffHelper onOff("ns3::UdpSocketFactory", InetSocketAddress(remoteAddr, port));
+    onOff.SetAttribute("DataRate", StringValue("64kbps"));
+    onOff.SetAttribute("PacketSize", UintegerValue(160));
+    onOff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
+    onOff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
 
-      ApplicationContainer apps = onOff.Install(ueNodes.Get(i));
-      apps.Start(Seconds(1.0));
-      apps.Stop(Seconds(simTime));
+    ApplicationContainer apps = onOff.Install(ueNodes.Get(i));
+    apps.Start(Seconds(1.0));
+    apps.Stop(Seconds(simTime));
 
-      PacketSinkHelper packetSink("ns3::UdpSocketFactory",
-                                  InetSocketAddress(Ipv4Address::GetAny(), port));
-      ApplicationContainer sinkApps = packetSink.Install(remoteHostContainer.Get(0));
-      sinkApps.Start(Seconds(0.5));
-      sinkApps.Stop(Seconds(simTime));
-    }
+    PacketSinkHelper packetSink("ns3::UdpSocketFactory",
+                                InetSocketAddress(Ipv4Address::GetAny(), port));
+    ApplicationContainer sinkApps = packetSink.Install(remoteHostContainer.Get(0));
+    sinkApps.Start(Seconds(0.5));
+    sinkApps.Stop(Seconds(simTime));
+
+    NS_LOG_INFO("VoIP installed on UE " << i << " -> port " << port);
+  }
 }
 
 // Background TCP traffic
 void
 InstallBackgroundTraffic(NodeContainer &ueNodes,
                          Ipv4Address remoteAddr,
-                         double simTime)
+                         double simTime,
+                         NodeContainer &remoteHostContainer)
 {
   NS_LOG_INFO("Installing background TCP traffic...");
   if (ueNodes.GetN() < 1)
-    {
-      NS_LOG_WARN("No UEs to install background traffic!");
-      return;
-    }
+  {
+    NS_LOG_WARN("No UEs to install background traffic!");
+    return;
+  }
 
   uint16_t port = 9000;
   BulkSendHelper bulkSend("ns3::TcpSocketFactory", InetSocketAddress(remoteAddr, port));
@@ -328,14 +334,14 @@ InstallBackgroundTraffic(NodeContainer &ueNodes,
   sendApps.Start(Seconds(2.0));
   sendApps.Stop(Seconds(simTime - 5.0));
 
-  // Install sink on remote host (assuming node after UEs is the remote host)
+  // Install sink on remote host
   PacketSinkHelper sink("ns3::TcpSocketFactory",
                         InetSocketAddress(Ipv4Address::GetAny(), port));
-  NodeContainer remoteHost;
-  remoteHost.Add(NodeList::GetNode(ueNodes.GetN() + 1));
-  ApplicationContainer sinkApps = sink.Install(remoteHost.Get(0));
+  ApplicationContainer sinkApps = sink.Install(remoteHostContainer.Get(0));
   sinkApps.Start(Seconds(1.5));
   sinkApps.Stop(Seconds(simTime));
+
+  NS_LOG_INFO("Background TCP traffic installed on UE 0 -> port " << port);
 }
 
 // Enable LTE traces
@@ -349,7 +355,7 @@ EnableLteTraces(Ptr<LteHelper> lteHelper)
   NS_LOG_INFO("Enabled LTE traces.");
 }
 
-// FlowMonitor
+// FlowMonitor setup
 Ptr<FlowMonitor>
 SetupFlowMonitor(FlowMonitorHelper &flowHelper)
 {
@@ -358,7 +364,7 @@ SetupFlowMonitor(FlowMonitorHelper &flowHelper)
   return flowMonitor;
 }
 
-// Periodic stats
+// Periodic stats update
 void
 PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor, FlowMonitorHelper &flowHelper)
 {
@@ -373,21 +379,25 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor, FlowMonitorHelper &flowHelper)
   uint64_t totalRxPackets = 0;      // for average latency calculation
 
   for (auto &iter : stats)
+  {
+    // If you only want to track certain flows, you can use the FiveTuple here:
+    // Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(iter.first);
+    // Currently, we consider all flows.
+
+    double duration = (iter.second.timeLastRxPacket - iter.second.timeFirstTxPacket).GetSeconds();
+    double throughput = 0.0;
+    if (duration > 0)
     {
-      double duration = (iter.second.timeLastRxPacket - iter.second.timeFirstTxPacket).GetSeconds();
-      double throughput = 0.0;
-      if (duration > 0)
-        {
-          throughput = (iter.second.rxBytes * 8.0) / duration; // bits/s
-          totalThroughput += throughput;
-        }
-      if (iter.second.rxPackets > 0)
-        {
-          double avgFlowLatency = iter.second.delaySum.GetSeconds() / iter.second.rxPackets;
-          totalLatencySum += (avgFlowLatency * iter.second.rxPackets);
-          totalRxPackets += iter.second.rxPackets;
-        }
+      throughput = (iter.second.rxBytes * 8.0) / duration; // bits/s
+      totalThroughput += throughput;
     }
+    if (iter.second.rxPackets > 0)
+    {
+      double avgFlowLatency = iter.second.delaySum.GetSeconds() / iter.second.rxPackets;
+      totalLatencySum += (avgFlowLatency * iter.second.rxPackets);
+      totalRxPackets += iter.second.rxPackets;
+    }
+  }
 
   double avgLatency = (totalRxPackets > 0) ? (totalLatencySum / totalRxPackets) : 0.0;
   double avgThroughput = totalThroughput; // bits/s
@@ -402,9 +412,9 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor, FlowMonitorHelper &flowHelper)
               << " Mbps, Avg Latency: " << avgLatency << " s");
 
   if (Simulator::Now().GetSeconds() + g_statsInterval <= Simulator::GetMaximumSimulationTime().GetSeconds())
-    {
-      Simulator::Schedule(Seconds(g_statsInterval), &PeriodicStatsUpdate, flowMonitor, std::ref(flowHelper));
-    }
+  {
+    Simulator::Schedule(Seconds(g_statsInterval), &PeriodicStatsUpdate, flowMonitor, std::ref(flowHelper));
+  }
 }
 
 // Manual Handover
@@ -412,78 +422,78 @@ void
 ManualHandoverCheck(Ptr<LteHelper> lteHelper, NodeContainer ueNodes, NodeContainer enbNodes)
 {
   for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+  {
+    Ptr<NetDevice> ueDevice = ueNodes.Get(i)->GetDevice(0);
+    Ptr<LteUeNetDevice> ueLteDevice = DynamicCast<LteUeNetDevice>(ueDevice);
+    if (!ueLteDevice)
     {
-      Ptr<NetDevice> ueDevice = ueNodes.Get(i)->GetDevice(0);
-      Ptr<LteUeNetDevice> ueLteDevice = DynamicCast<LteUeNetDevice>(ueDevice);
-      if (!ueLteDevice)
-        {
-          continue; // Not an LTE device
-        }
-      Ptr<MobilityModel> ueMobility = ueNodes.Get(i)->GetObject<MobilityModel>();
-
-      // Find closest eNB
-      double minDistance = 1e9;
-      uint16_t bestEnbIdx = 0;
-      for (uint32_t j = 0; j < enbNodes.GetN(); ++j)
-        {
-          Ptr<MobilityModel> enbMobility = enbNodes.Get(j)->GetObject<MobilityModel>();
-          double distance = ueMobility->GetDistanceFrom(enbMobility);
-          if (distance < minDistance)
-            {
-              minDistance = distance;
-              bestEnbIdx = j;
-            }
-        }
-
-      // Current Cell ID from UE RRC
-      Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
-      if (!ueRrc)
-        {
-          continue; // RRC not established
-        }
-      uint16_t currentCellId = ueRrc->GetCellId();
-
-      // Find the NetDevice of the source eNB by matching currentCellId
-      Ptr<NetDevice> sourceEnbDev;
-      for (uint32_t j = 0; j < enbNodes.GetN(); ++j)
-        {
-          Ptr<LteEnbNetDevice> enbDev = enbNodes.Get(j)->GetDevice(0)->GetObject<LteEnbNetDevice>();
-          if (enbDev && enbDev->GetCellId() == currentCellId)
-            {
-              sourceEnbDev = enbDev;
-              break;
-            }
-        }
-
-      // Best Cell ID from eNB net device
-      Ptr<LteEnbNetDevice> bestEnbLteDev = DynamicCast<LteEnbNetDevice>(enbNodes.Get(bestEnbIdx)->GetDevice(0));
-      if (!bestEnbLteDev)
-        {
-          continue;
-        }
-      uint16_t bestCellId = bestEnbLteDev->GetCellId();
-
-      // Trigger if bestCellId != currentCellId and closer than threshold
-      double threshold = 50.0; // e.g., 50m threshold
-      if ((bestCellId != currentCellId) && (minDistance < threshold) && sourceEnbDev)
-        {
-          NS_LOG_INFO("Triggering handover for UE " << i
-                      << " from Cell " << currentCellId
-                      << " to Cell " << bestCellId
-                      << " (distance=" << minDistance << "m)");
-          // hoTime, ueDev, sourceEnbDev, targetCellId
-          lteHelper->HandoverRequest(Seconds(0.1), ueDevice, sourceEnbDev, bestCellId);
-        }
+      continue; // Not an LTE device
     }
+    Ptr<MobilityModel> ueMobility = ueNodes.Get(i)->GetObject<MobilityModel>();
+
+    // Find closest eNB
+    double minDistance = 1e9;
+    uint16_t bestEnbIdx = 0;
+    for (uint32_t j = 0; j < enbNodes.GetN(); ++j)
+    {
+      Ptr<MobilityModel> enbMobility = enbNodes.Get(j)->GetObject<MobilityModel>();
+      double distance = ueMobility->GetDistanceFrom(enbMobility);
+      if (distance < minDistance)
+      {
+        minDistance = distance;
+        bestEnbIdx = j;
+      }
+    }
+
+    // Current Cell ID from UE RRC
+    Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
+    if (!ueRrc)
+    {
+      continue; // RRC not established
+    }
+    uint16_t currentCellId = ueRrc->GetCellId();
+
+    // Find the NetDevice of the source eNB by matching currentCellId
+    Ptr<NetDevice> sourceEnbDev;
+    for (uint32_t j = 0; j < enbNodes.GetN(); ++j)
+    {
+      Ptr<LteEnbNetDevice> enbDev = enbNodes.Get(j)->GetDevice(0)->GetObject<LteEnbNetDevice>();
+      if (enbDev && enbDev->GetCellId() == currentCellId)
+      {
+        sourceEnbDev = enbDev;
+        break;
+      }
+    }
+
+    // Best Cell ID from eNB net device
+    Ptr<LteEnbNetDevice> bestEnbLteDev = DynamicCast<LteEnbNetDevice>(enbNodes.Get(bestEnbIdx)->GetDevice(0));
+    if (!bestEnbLteDev)
+    {
+      continue;
+    }
+    uint16_t bestCellId = bestEnbLteDev->GetCellId();
+
+    // Trigger if bestCellId != currentCellId and closer than threshold
+    double threshold = 50.0; // e.g., 50m threshold
+    if ((bestCellId != currentCellId) && (minDistance < threshold) && sourceEnbDev)
+    {
+      NS_LOG_INFO("Triggering handover for UE " << i
+                  << " from Cell " << currentCellId
+                  << " to Cell " << bestCellId
+                  << " (distance=" << minDistance << "m)");
+      // hoTime, ueDev, sourceEnbDev, targetCellId
+      lteHelper->HandoverRequest(Seconds(0.1), ueDevice, sourceEnbDev, bestCellId);
+    }
+  }
 
   // Reschedule
   if (Simulator::Now().GetSeconds() + 1.0 <= Simulator::GetMaximumSimulationTime().GetSeconds())
-    {
-      Simulator::Schedule(Seconds(1.0), &ManualHandoverCheck, lteHelper, ueNodes, enbNodes);
-    }
+  {
+    Simulator::Schedule(Seconds(1.0), &ManualHandoverCheck, lteHelper, ueNodes, enbNodes);
+  }
 }
 
-// UE attachment
+// UE attachment callback
 void
 NotifyUeAttached(std::string context, uint64_t imsi, uint16_t cellId, uint16_t rnti)
 {
@@ -493,7 +503,7 @@ NotifyUeAttached(std::string context, uint64_t imsi, uint16_t cellId, uint16_t r
               << ", RNTI=" << rnti);
 }
 
-// Packet drop
+// Packet drop callback
 void
 NotifyPacketDrop(std::string context, Ptr<const Packet> packet)
 {
@@ -501,7 +511,7 @@ NotifyPacketDrop(std::string context, Ptr<const Packet> packet)
               << " time " << Simulator::Now().GetSeconds() << "s");
 }
 
-// RRC state transition
+// RRC state transition callback
 void
 NotifyRrcStateChange(std::string context, uint64_t imsi, uint16_t cellId,
                      uint16_t rnti, uint8_t oldState, uint8_t newState)
@@ -513,23 +523,23 @@ NotifyRrcStateChange(std::string context, uint64_t imsi, uint16_t cellId,
               << Simulator::Now().GetSeconds() << "s");
 }
 
-// Periodic UE positions
+// Periodic UE positions logging
 void
 LogUePositions(NodeContainer &ueNodes)
 {
   for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
-    {
-      Ptr<MobilityModel> mob = ueNodes.Get(i)->GetObject<MobilityModel>();
-      Vector pos = mob->GetPosition();
-      NS_LOG_INFO("Time " << Simulator::Now().GetSeconds()
-                  << "s - UE " << i
-                  << " Position: (" << pos.x << ", " << pos.y << ", " << pos.z << ")");
-    }
+  {
+    Ptr<MobilityModel> mob = ueNodes.Get(i)->GetObject<MobilityModel>();
+    Vector pos = mob->GetPosition();
+    NS_LOG_INFO("Time " << Simulator::Now().GetSeconds()
+                << "s - UE " << i
+                << " Position: (" << pos.x << ", " << pos.y << ", " << pos.z << ")");
+  }
 
   if (Simulator::Now().GetSeconds() + 1.0 <= Simulator::GetMaximumSimulationTime().GetSeconds())
-    {
-      Simulator::Schedule(Seconds(1.0), &LogUePositions, std::ref(ueNodes));
-    }
+  {
+    Simulator::Schedule(Seconds(1.0), &LogUePositions, std::ref(ueNodes));
+  }
 }
 
 // FlowMonitor analysis
@@ -554,32 +564,32 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
   uint64_t totalTxPackets = 0;
 
   for (auto &iter : stats)
+  {
+    flowCount++;
+    Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(iter.first);
+
+    double duration = (iter.second.timeLastRxPacket - iter.second.timeFirstTxPacket).GetSeconds();
+    double throughput = 0.0;
+    if (duration > 0)
     {
-      flowCount++;
-      Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(iter.first);
-
-      double duration = (iter.second.timeLastRxPacket - iter.second.timeFirstTxPacket).GetSeconds();
-      double throughput = 0.0;
-      if (duration > 0)
-        {
-          throughput = (iter.second.rxBytes * 8.0) / duration;
-        }
-      double avgLatency = 0.0;
-      double avgJitter  = 0.0;
-      if (iter.second.rxPackets > 0)
-        {
-          avgLatency = iter.second.delaySum.GetSeconds() / iter.second.rxPackets;
-          avgJitter  = iter.second.jitterSum.GetSeconds() / iter.second.rxPackets;
-        }
-      totalThroughputSum += throughput;
-      totalLatencySum += (avgLatency * iter.second.rxPackets);
-      totalJitterSum  += (avgJitter  * iter.second.rxPackets);
-      totalRxPackets  += iter.second.rxPackets;
-      totalTxPackets  += iter.second.txPackets;
-
-      latencyValues.push_back(avgLatency);
-      jitterValues.push_back(avgJitter);
+      throughput = (iter.second.rxBytes * 8.0) / duration;
     }
+    double avgLatency = 0.0;
+    double avgJitter  = 0.0;
+    if (iter.second.rxPackets > 0)
+    {
+      avgLatency = iter.second.delaySum.GetSeconds() / iter.second.rxPackets;
+      avgJitter  = iter.second.jitterSum.GetSeconds() / iter.second.rxPackets;
+    }
+    totalThroughputSum += throughput;
+    totalLatencySum += (avgLatency * iter.second.rxPackets);
+    totalJitterSum  += (avgJitter  * iter.second.rxPackets);
+    totalRxPackets  += iter.second.rxPackets;
+    totalTxPackets  += iter.second.txPackets;
+
+    latencyValues.push_back(avgLatency);
+    jitterValues.push_back(avgJitter);
+  }
 
   double overallAvgLatency = (totalRxPackets > 0) ? (totalLatencySum / totalRxPackets) : 0.0;
   double overallAvgJitter  = (totalRxPackets > 0) ? (totalJitterSum / totalRxPackets) : 0.0;
@@ -599,9 +609,9 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
     dataset.SetStyle(Gnuplot2dDataset::LINES_POINTS);
 
     for (size_t i = 0; i < g_timeSeries.size(); ++i)
-      {
-        dataset.Add(g_timeSeries[i], g_throughputSeries[i]);
-      }
+    {
+      dataset.Add(g_timeSeries[i], g_throughputSeries[i]);
+    }
     plot.AddDataset(dataset);
 
     std::ofstream plotFile(outputDir + "/time-series-throughput.plt");
@@ -621,9 +631,9 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
     dataset.SetStyle(Gnuplot2dDataset::LINES_POINTS);
 
     for (size_t i = 0; i < g_timeSeries.size(); ++i)
-      {
-        dataset.Add(g_timeSeries[i], g_avgLatencySeries[i]);
-      }
+    {
+      dataset.Add(g_timeSeries[i], g_avgLatencySeries[i]);
+    }
     plot.AddDataset(dataset);
 
     std::ofstream plotFile(outputDir + "/time-series-latency.plt");
@@ -644,10 +654,10 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
     dataset.SetStyle(Gnuplot2dDataset::LINES);
 
     for (size_t i = 0; i < latencyValues.size(); ++i)
-      {
-        double percent = (double)(i + 1) / latencyValues.size();
-        dataset.Add(latencyValues[i], percent);
-      }
+    {
+      double percent = (double)(i + 1) / latencyValues.size();
+      dataset.Add(latencyValues[i], percent);
+    }
     plot.AddDataset(dataset);
     std::ofstream plotFile(outputDir + "/cdf-latency.plt");
     plot.GenerateOutput(plotFile);
@@ -667,10 +677,10 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
     dataset.SetStyle(Gnuplot2dDataset::LINES);
 
     for (size_t i = 0; i < jitterValues.size(); ++i)
-      {
-        double percent = (double)(i + 1) / jitterValues.size();
-        dataset.Add(jitterValues[i], percent);
-      }
+    {
+      double percent = (double)(i + 1) / jitterValues.size();
+      dataset.Add(jitterValues[i], percent);
+    }
     plot.AddDataset(dataset);
     std::ofstream plotFile(outputDir + "/cdf-jitter.plt");
     plot.GenerateOutput(plotFile);
