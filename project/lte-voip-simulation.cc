@@ -7,6 +7,7 @@
  *  - Correct usage of HandoverRequest.
  *  - Proper usage of TrafficControlHelper.
  *  - Removal of unused variables.
+ *  - Outputs are saved in the current directory.
  */
 
 #include "ns3/core-module.h"
@@ -38,11 +39,11 @@ std::vector<double> g_avgLatencySeries; // s
 void ConfigureLogging();
 void ConfigureEnbMobility(NodeContainer &enbNodes);
 void ConfigureUeMobility(NodeContainer &ueNodes, double areaSize);
-Ipv4Address CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper, NodeContainer &remoteHostContainer, const std::string &outputDir);
+Ipv4Address CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper, NodeContainer &remoteHostContainer);
 void InstallVoipApplications(NodeContainer &ueNodes, Ipv4Address remoteAddr, double simTime, NodeContainer &remoteHostContainer);
 void InstallBackgroundTraffic(NodeContainer &ueNodes, Ipv4Address remoteAddr, double simTime, NodeContainer &remoteHostContainer);
 Ptr<FlowMonitor> SetupFlowMonitor(FlowMonitorHelper &flowHelper);
-void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMonitor, const std::string &outputDir, double simTime);
+void AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper, Ptr<FlowMonitor> flowMonitor, double simTime);
 void EnableLteTraces(Ptr<LteHelper> lteHelper);
 
 void PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor, FlowMonitorHelper &flowHelper);
@@ -61,7 +62,6 @@ main(int argc, char *argv[])
   uint16_t numEnb = 2;
   uint16_t numUe = 5;
   double simTime = 50.0;
-  std::string outputDir = "lte-voip-output";
   double areaSize = 500.0;
   bool enableBackgroundTraffic = false;
 
@@ -69,13 +69,11 @@ main(int argc, char *argv[])
   cmd.AddValue("numEnb", "Number of eNodeBs", numEnb);
   cmd.AddValue("numUe", "Number of UEs", numUe);
   cmd.AddValue("simTime", "Simulation time (s)", simTime);
-  cmd.AddValue("outputDir", "Output directory", outputDir);
   cmd.AddValue("areaSize", "Square area for UE random positions [0..areaSize]", areaSize);
   cmd.AddValue("enableBackgroundTraffic", "Enable extra TCP background traffic", enableBackgroundTraffic);
   cmd.Parse(argc, argv);
 
-  // Create output directory (ignore return value)
-  (void)system(("mkdir -p " + outputDir).c_str());
+  // Removed outputDir logic to save all outputs in the current directory
 
   // Configure logging
   ConfigureLogging();
@@ -124,8 +122,8 @@ main(int argc, char *argv[])
     lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(i % numEnb));
   }
 
-  // Create remote host link
-  Ipv4Address remoteHostAddr = CreateRemoteHost(epcHelper, remoteHostContainer, outputDir);
+  // Create remote host link without outputDir
+  Ipv4Address remoteHostAddr = CreateRemoteHost(epcHelper, remoteHostContainer);
 
   // Install VoIP apps
   InstallVoipApplications(ueNodes, remoteHostAddr, simTime, remoteHostContainer);
@@ -164,7 +162,7 @@ main(int argc, char *argv[])
   Simulator::Run();
 
   // Post-processing (FlowMonitor analysis, output generation)
-  AnalyzeFlowMonitor(flowHelper, flowMonitor, outputDir, simTime);
+  AnalyzeFlowMonitor(flowHelper, flowMonitor, simTime);
 
   Simulator::Destroy();
   NS_LOG_INFO("Enhanced LTE simulation finished!");
@@ -217,8 +215,8 @@ ConfigureUeMobility(NodeContainer &ueNodes, double areaSize)
   ueMobility.SetPositionAllocator(positionAlloc);
 
   ueMobility.SetMobilityModel("ns3::RandomWaypointMobilityModel",
-                              "Speed", StringValue("ns3::UniformRandomVariable[Min=2.0|Max=10.0]"),
-                              "Pause", StringValue("ns3::ConstantRandomVariable[Constant=1.0]"),
+                              "Speed", StringValue("ns3::UniformRandomVariable[Min=5.0|Max=15.0]"),
+                              "Pause", StringValue("ns3::ConstantRandomVariable[Constant=2.0]"),
                               "PositionAllocator", PointerValue(positionAlloc));
 
   ueMobility.Install(ueNodes);
@@ -244,8 +242,7 @@ ConfigureUeMobility(NodeContainer &ueNodes, double areaSize)
 // Remote Host + PGW link
 Ipv4Address
 CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
-                 NodeContainer &remoteHostContainer,
-                 const std::string &outputDir)
+                 NodeContainer &remoteHostContainer)
 {
   Ptr<Node> pgw = epcHelper->GetPgwNode();
   PointToPointHelper p2p;
@@ -269,9 +266,9 @@ CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
   pgwMobility.Install(pgw);
   pgw->GetObject<MobilityModel>()->SetPosition(Vector(0.0, 0.0, 1.5));
 
-  // Enable PCAP
-  p2p.EnablePcap(outputDir + "/pgw-p2p", devices.Get(0), true);
-  p2p.EnablePcap(outputDir + "/remote-host-p2p", devices.Get(1), true);
+  // Enable PCAP without outputDir
+  p2p.EnablePcap("pgw-p2p", devices.Get(0), true);
+  p2p.EnablePcap("remote-host-p2p", devices.Get(1), true);
 
   return interfaces.GetAddress(1);
 }
@@ -288,7 +285,7 @@ InstallVoipApplications(NodeContainer &ueNodes,
   {
     uint16_t port = basePort + i;
     OnOffHelper onOff("ns3::UdpSocketFactory", InetSocketAddress(remoteAddr, port));
-    onOff.SetAttribute("DataRate", StringValue("64kbps"));
+    onOff.SetAttribute("DataRate", StringValue("32kbps"));
     onOff.SetAttribute("PacketSize", UintegerValue(160));
     onOff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
     onOff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
@@ -354,6 +351,8 @@ Ptr<FlowMonitor>
 SetupFlowMonitor(FlowMonitorHelper &flowHelper)
 {
   Ptr<FlowMonitor> flowMonitor = flowHelper.InstallAll();
+  flowMonitor->CheckForLostPackets();
+  auto stats = flowMonitor->GetFlowStats();
   NS_LOG_INFO("FlowMonitor installed.");
   return flowMonitor;
 }
@@ -544,7 +543,6 @@ LogUePositions(NodeContainer &ueNodes)
 void
 AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
                    Ptr<FlowMonitor> flowMonitor,
-                   const std::string &outputDir,
                    double simTime)
 {
   flowMonitor->CheckForLostPackets();
@@ -595,10 +593,12 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
   double packetLossRate = (totalTxPackets > 0)
                           ? (double)(totalTxPackets - totalRxPackets) / totalTxPackets * 100.0
                           : 0.0;
+  double overallAvgLatencyMs = overallAvgLatency * 1000.0; // Convert latency to ms
+  double overallAvgJitterMs = overallAvgJitter * 1000.0;   // Convert jitter to ms
 
   // Time-series throughput plot
   {
-    Gnuplot plot(outputDir + "/time-series-throughput.plt");
+    Gnuplot plot("time-series-throughput.plt");
     plot.SetTitle("Time-Series Throughput");
     plot.SetTerminal("png");
     plot.SetLegend("Time (s)", "Throughput (bps)");
@@ -612,19 +612,19 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
     }
     plot.AddDataset(dataset);
 
-    // Manually set the output to a PNG file within the .plt file
-    std::ofstream plotFile(outputDir + "/time-series-throughput.plt");
+    // Set the output to a PNG file in the current directory
+    std::ofstream plotFile("time-series-throughput.plt");
     plotFile << "set terminal png\n";
-    plotFile << "set output \"" << outputDir << "/time-series-throughput.png\"\n";
+    plotFile << "set output \"time-series-throughput.png\"\n";
     plot.GenerateOutput(plotFile);
     plotFile.close();
     NS_LOG_INFO("Time-series throughput plot generated.");
   }
 
 
-    // Time-series latency plot
+  // Time-series latency plot
   {
-    Gnuplot plot(outputDir + "/time-series-latency.plt");
+    Gnuplot plot("time-series-latency.plt");
     plot.SetTitle("Time-Series Avg Latency");
     plot.SetTerminal("png");
     plot.SetLegend("Time (s)", "Latency (s)");
@@ -638,20 +638,20 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
     }
     plot.AddDataset(dataset);
 
-    // Manually set the output to a PNG file within the .plt file
-    std::ofstream plotFile(outputDir + "/time-series-latency.plt");
+    // Set the output to a PNG file in the current directory
+    std::ofstream plotFile("time-series-latency.plt");
     plotFile << "set terminal png\n";
-    plotFile << "set output \"" << outputDir << "/time-series-latency.png\"\n";
+    plotFile << "set output \"time-series-latency.png\"\n";
     plot.GenerateOutput(plotFile);
     plotFile.close();
     NS_LOG_INFO("Time-series latency plot generated.");
   }
 
 
-    // CDF: Latency
+  // CDF: Latency
   {
     std::sort(latencyValues.begin(), latencyValues.end());
-    Gnuplot plot(outputDir + "/cdf-latency.plt");
+    Gnuplot plot("cdf-latency.plt");
     plot.SetTitle("CDF - Latency");
     plot.SetTerminal("png");
     plot.SetLegend("Latency (s)", "Cumulative Probability");
@@ -666,20 +666,20 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
     }
     plot.AddDataset(dataset);
 
-    // Manually set the output to a PNG file within the .plt file
-    std::ofstream plotFile(outputDir + "/cdf-latency.plt");
+    // Set the output to a PNG file in the current directory
+    std::ofstream plotFile("cdf-latency.plt");
     plotFile << "set terminal png\n";
-    plotFile << "set output \"" << outputDir << "/cdf-latency.png\"\n";
+    plotFile << "set output \"cdf-latency.png\"\n";
     plot.GenerateOutput(plotFile);
     plotFile.close();
     NS_LOG_INFO("CDF for latency generated.");
   }
 
 
-    // CDF: Jitter
+  // CDF: Jitter
   {
     std::sort(jitterValues.begin(), jitterValues.end());
-    Gnuplot plot(outputDir + "/cdf-jitter.plt");
+    Gnuplot plot("cdf-jitter.plt");
     plot.SetTitle("CDF - Jitter");
     plot.SetTerminal("png");
     plot.SetLegend("Jitter (s)", "Cumulative Probability");
@@ -694,10 +694,10 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
     }
     plot.AddDataset(dataset);
 
-    // Manually set the output to a PNG file within the .plt file
-    std::ofstream plotFile(outputDir + "/cdf-jitter.plt");
+    // Set the output to a PNG file in the current directory
+    std::ofstream plotFile("cdf-jitter.plt");
     plotFile << "set terminal png\n";
-    plotFile << "set output \"" << outputDir << "/cdf-jitter.png\"\n";
+    plotFile << "set output \"cdf-jitter.png\"\n";
     plot.GenerateOutput(plotFile);
     plotFile.close();
     NS_LOG_INFO("CDF for jitter generated.");
@@ -706,28 +706,29 @@ AnalyzeFlowMonitor(FlowMonitorHelper &flowHelper,
   // Summaries
   NS_LOG_INFO("===== FINAL METRICS =====");
   NS_LOG_INFO("Avg Throughput: " << overallAvgThroughput / 1e6 << " Mbps");
-  NS_LOG_INFO("Avg Latency   : " << overallAvgLatency << " s");
-  NS_LOG_INFO("Avg Jitter    : " << overallAvgJitter  << " s");
-  NS_LOG_INFO("Packet Loss   : " << packetLossRate    << "%");
+  NS_LOG_INFO("Avg Latency   : " << overallAvgLatencyMs << " ms");
+  NS_LOG_INFO("Avg Jitter    : " << overallAvgJitterMs << " ms");
+  NS_LOG_INFO("Packet Loss   : " << packetLossRate << "%");
 
-  flowMonitor->SerializeToXmlFile(outputDir + "/flowmon.xml", true, true);
+
+  flowMonitor->SerializeToXmlFile("flowmon.xml", true, true);
   NS_LOG_INFO("FlowMonitor results saved to XML.");
 
   // Simple Markdown report
-  std::ofstream mdReport(outputDir + "/simulation-report.md");
+  std::ofstream mdReport("simulation-report.md");
   mdReport << "# Simulation Report\n\n";
   mdReport << "**Simulation Time**: " << simTime << "s\n\n";
   mdReport << "## Final Metrics Summary\n";
   mdReport << "- **Avg Throughput**: " << overallAvgThroughput / 1e6 << " Mbps\n";
-  mdReport << "- **Avg Latency**   : " << overallAvgLatency << " s\n";
-  mdReport << "- **Avg Jitter**    : " << overallAvgJitter  << " s\n";
-  mdReport << "- **Packet Loss**   : " << packetLossRate    << "%\n\n";
+  mdReport << "- **Avg Latency**   : " << overallAvgLatencyMs << " ms\n";
+  mdReport << "- **Avg Jitter**    : " << overallAvgJitterMs << " ms\n";
+  mdReport << "- **Packet Loss**   : " << packetLossRate << "%\n\n";
   mdReport << "## Generated Plots\n";
-  mdReport << "- `time-series-throughput.plt` (png)\n";
-  mdReport << "- `time-series-latency.plt` (png)\n";
-  mdReport << "- `cdf-latency.plt` (png)\n";
-  mdReport << "- `cdf-jitter.plt` (png)\n\n";
-  mdReport << "(Use `gnuplot filename.plt` to convert `.plt` files to `.png`.)\n";
+  mdReport << "- time-series-throughput.plt (png)\n";
+  mdReport << "- time-series-latency.plt (png)\n";
+  mdReport << "- cdf-latency.plt (png)\n";
+  mdReport << "- cdf-jitter.plt (png)\n\n";
+  mdReport << "(Use gnuplot filename.plt to convert .plt files to .png.)\n";
   mdReport.close();
-  NS_LOG_INFO("Markdown report generated: " << outputDir << "/simulation-report.md");
+  NS_LOG_INFO("Markdown report generated: simulation-report.md");
 }
