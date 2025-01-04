@@ -56,10 +56,10 @@ int
 main(int argc, char* argv[])
 {
     // Default parameters
-    uint16_t numEnb = 4;       // Two eNodeBs as per assignment
+    uint16_t numEnb = 4;       // Changed to 4 eNodeBs
     uint16_t numUe = 5;        // Five UEs as per assignment
     double simTime = 20.0;     // Simulation time in seconds
-    double areaSize = 100.0;   // Area size for node distribution (400x400 meters)
+    double areaSize = 100.0;   // Area size for node distribution (100x100 meters)
     bool enableNetAnim = true; // Enable NetAnim visualization
 
     // Parse command-line arguments
@@ -76,7 +76,7 @@ main(int argc, char* argv[])
 
     // Create nodes
     NodeContainer enbNodes, ueNodes, remoteHostContainer;
-    enbNodes.Create(numEnb);
+    enbNodes.Create(numEnb); // Now creates 4 eNodeBs
     ueNodes.Create(numUe);
     remoteHostContainer.Create(1); // Remote Host
 
@@ -84,6 +84,7 @@ main(int argc, char* argv[])
     Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
     Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
     lteHelper->SetEpcHelper(epcHelper);
+
 
     // Set the Path Loss Model to ThreeLogDistancePropagationLossModel BEFORE installing devices
     lteHelper->SetPathlossModelType(
@@ -527,32 +528,6 @@ LogAllNodePositions()
         else
         {
             NS_LOG_WARN("Node " << i << " does not have a MobilityModel!");
-
-            // Inspect Node Components
-            NS_LOG_INFO("Inspecting Node " << i << ":");
-            for (uint32_t j = 0; j < node->GetNDevices(); ++j)
-            {
-                Ptr<NetDevice> device = node->GetDevice(j);
-                NS_LOG_INFO("  - Device Type: " << device->GetInstanceTypeId());
-            }
-
-            // Check if the node is part of a helper (e.g., PGW or EPC-related)
-            if (node->GetObject<LteEnbNetDevice>())
-            {
-                NS_LOG_INFO("  - This node is an eNodeB device.");
-            }
-            else if (node->GetObject<LteUeNetDevice>())
-            {
-                NS_LOG_INFO("  - This node is a UE device.");
-            }
-            else if (node->GetObject<PointToPointNetDevice>())
-            {
-                NS_LOG_INFO("  - This node is a Point-to-Point device.");
-            }
-            else
-            {
-                NS_LOG_INFO("  - Node Type: Unknown.");
-            }
         }
     }
     NS_LOG_INFO("-----------------------------------------------------");
