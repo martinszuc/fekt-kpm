@@ -1,7 +1,7 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /**
- * @file enhanced-lte-voip-simulation-simple.cc
- * @brief Enhanced LTE + VoIP simulation for ns-3.39 with multiple eNodeBs and UEs.
+ * @file enhanced-lte-voip-simulation-udp.cc
+ * @brief Enhanced LTE + VoIP simulation for ns-3.39 using UDP clients and multiple eNodeBs and UEs.
  */
 
 #include "ns3/animation-interface.h"
@@ -16,10 +16,11 @@
 #include "ns3/network-module.h"
 #include "ns3/packet-sink-helper.h"
 #include "ns3/point-to-point-module.h"
+#include "ns3/ping-helper.h"
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("EnhancedLteVoipSimulationSimple");
+NS_LOG_COMPONENT_DEFINE("EnhancedLteVoipSimulationUDP");
 
 // Global variables for real-time stats
 static double g_statsInterval = 5.0; // seconds
@@ -41,6 +42,9 @@ void InstallVoipApplications(NodeContainer& ueNodes,
                              Ipv4Address remoteAddr,
                              double simTime,
                              NodeContainer& remoteHostContainer);
+void InstallPingApplications(NodeContainer& ueNodes,
+                             Ipv4Address remoteAddr,
+                             double simTime);
 Ptr<FlowMonitor> SetupFlowMonitor(FlowMonitorHelper& flowHelper);
 void AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
                         Ptr<FlowMonitor> flowMonitor,
@@ -56,9 +60,9 @@ int
 main(int argc, char* argv[])
 {
     // Default parameters
-    uint16_t numEnb = 4;       // Changed to 4 eNodeBs
-    uint16_t numUe = 5;        // Five UEs as per assignment
-    double simTime = 20.0;     // Simulation time in seconds
+    uint16_t numEnb = 4;       // 4 eNodeBs
+    uint16_t numUe = 5;        // 5 UEs
+    double simTime = 100.0;    // Simulation time in seconds
     double areaSize = 100.0;   // Area size for node distribution (100x100 meters)
     bool enableNetAnim = true; // Enable NetAnim visualization
 
@@ -76,7 +80,7 @@ main(int argc, char* argv[])
 
     // Create nodes
     NodeContainer enbNodes, ueNodes, remoteHostContainer;
-    enbNodes.Create(numEnb); // Now creates 4 eNodeBs
+    enbNodes.Create(numEnb); // Creates eNodeBs
     ueNodes.Create(numUe);
     remoteHostContainer.Create(1); // Remote Host
 
@@ -84,7 +88,6 @@ main(int argc, char* argv[])
     Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
     Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
     lteHelper->SetEpcHelper(epcHelper);
-
 
     // Set the Path Loss Model to ThreeLogDistancePropagationLossModel BEFORE installing devices
     lteHelper->SetPathlossModelType(
@@ -184,6 +187,10 @@ main(int argc, char* argv[])
 
     // **Create remote host link**
     Ipv4Address remoteHostAddr = CreateRemoteHost(epcHelper, remoteHostContainer, areaSize);
+    NS_LOG_INFO("Remote Host IP Address: " << remoteHostAddr);
+
+    // **Install Ping applications for connectivity verification**
+    InstallPingApplications(ueNodes, remoteHostAddr, simTime);
 
     // **Install VoIP applications**
     InstallVoipApplications(ueNodes, remoteHostAddr, simTime, remoteHostContainer);
@@ -264,10 +271,15 @@ main(int argc, char* argv[])
 void
 ConfigureLogging()
 {
-    LogComponentEnable("EnhancedLteVoipSimulationSimple", LOG_LEVEL_INFO);
-    LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);
+    // Enable more detailed logging for debugging (optional)
+    LogComponentEnable("EnhancedLteVoipSimulationUDP", LOG_LEVEL_INFO);
+    LogComponentEnable("UdpClient", LOG_LEVEL_INFO);
     LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
-    // Enable more components if needed for debugging
+    // Uncomment below for more detailed logs
+    // LogComponentEnable("EnhancedLteVoipSimulationUDP", LOG_LEVEL_ALL);
+    // LogComponentEnable("UdpClient", LOG_LEVEL_ALL);
+    // LogComponentEnable("PacketSink", LOG_LEVEL_ALL);
+    // LogComponentEnable("PingApplication", LOG_LEVEL_ALL);
 }
 
 // Configure mobility for eNodeBs with fixed positions
@@ -278,9 +290,9 @@ ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize)
     Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
 
     // Define positions for 4 eNodeBs at quarter points
-    posAlloc->Add(Vector(areaSize / 4, areaSize / 4, 30.0));   // eNodeB 0: (25,25)
-    posAlloc->Add(Vector(areaSize / 4, 3 * areaSize / 4, 30.0)); // eNodeB 1: (25,75)
-    posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 4, 30.0)); // eNodeB 2: (75,25)
+    posAlloc->Add(Vector(areaSize / 4, areaSize / 4, 30.0));      // eNodeB 0: (25,25)
+    posAlloc->Add(Vector(areaSize / 4, 3 * areaSize / 4, 30.0));  // eNodeB 1: (25,75)
+    posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 4, 30.0));  // eNodeB 2: (75,25)
     posAlloc->Add(Vector(3 * areaSize / 4, 3 * areaSize / 4, 30.0)); // eNodeB 3: (75,75)
 
     enbMobility.SetPositionAllocator(posAlloc);
@@ -318,7 +330,7 @@ ConfigureUeMobility(NodeContainer& ueNodes, double areaSize)
         "Speed",
         StringValue("ns3::UniformRandomVariable[Min=10.0|Max=30.0]"), // Speed in m/s
         "Pause",
-        StringValue("ns3::ConstantRandomVariable[Constant=2.0]"), // Pause time in seconds
+        StringValue("ns3::ConstantRandomVariable[Constant=2.0]"),     // Pause time in seconds
         "PositionAllocator",
         PointerValue(positionAlloc));
     ueMobility.Install(ueNodes);
@@ -389,10 +401,10 @@ CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
     p2p.EnablePcap("pgw-p2p", devices.Get(0), true);
     p2p.EnablePcap("remote-host-p2p", devices.Get(1), true);
 
-    return interfaces.GetAddress(1);
+    return interfaces.GetAddress(1); // 1.0.0.2
 }
 
-// Install VoIP applications on UEs
+// Install VoIP applications on UEs using UdpClient and PacketSink
 void
 InstallVoipApplications(NodeContainer& ueNodes,
                         Ipv4Address remoteAddr,
@@ -403,27 +415,40 @@ InstallVoipApplications(NodeContainer& ueNodes,
     for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
     {
         uint16_t port = basePort + i;
-        // Configure VoIP traffic using OnOff application with UDP
-        OnOffHelper onOff("ns3::UdpSocketFactory", InetSocketAddress(remoteAddr, port));
-        onOff.SetAttribute("DataRate", StringValue("32kbps")); // Typical VoIP bitrate
-        onOff.SetAttribute("PacketSize", UintegerValue(160));  // Packet size in bytes
-        onOff.SetAttribute("OnTime",
-                           StringValue("ns3::ConstantRandomVariable[Constant=1]")); // Always on
-        onOff.SetAttribute("OffTime",
-                           StringValue("ns3::ConstantRandomVariable[Constant=0]")); // No off time
+        // Configure VoIP traffic using UdpClient with UDP
+        UdpClientHelper client(remoteAddr, port);
+        client.SetAttribute("MaxPackets", UintegerValue(1000000)); // High number of packets
+        client.SetAttribute("Interval", TimeValue(MilliSeconds(12.8))); // Calculated for 100kbps and 160 bytes
+        client.SetAttribute("PacketSize", UintegerValue(160)); // Packet size in bytes
 
-        ApplicationContainer apps = onOff.Install(ueNodes.Get(i));
-        apps.Start(Seconds(1.0));
-        apps.Stop(Seconds(simTime));
+        ApplicationContainer clientApps = client.Install(ueNodes.Get(i));
+        clientApps.Start(Seconds(1.0));
+        clientApps.Stop(Seconds(simTime));
 
         // Install PacketSink on remote host to receive VoIP traffic
-        PacketSinkHelper packetSink("ns3::UdpSocketFactory",
-                                    InetSocketAddress(Ipv4Address::GetAny(), port));
-        ApplicationContainer sinkApps = packetSink.Install(remoteHostContainer.Get(0));
+        PacketSinkHelper sink("ns3::UdpSocketFactory",
+                              InetSocketAddress(Ipv4Address::GetAny(), port));
+        ApplicationContainer sinkApps = sink.Install(remoteHostContainer.Get(0));
         sinkApps.Start(Seconds(0.5));
         sinkApps.Stop(Seconds(simTime));
 
-        NS_LOG_INFO("VoIP installed on UE " << i << " -> port " << port);
+        NS_LOG_INFO("VoIP (UdpClient) installed on UE " << i << " -> port " << port);
+    }
+}
+
+void
+InstallPingApplications(NodeContainer& ueNodes, Ipv4Address remoteAddr, double simTime)
+{
+    PingHelper pingHelper(remoteAddr);
+    pingHelper.SetAttribute("Interval", TimeValue(Seconds(1.0)));
+
+    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+    {
+        ApplicationContainer pingApps = pingHelper.Install(ueNodes.Get(i));
+        pingApps.Start(Seconds(2.0));
+        pingApps.Stop(Seconds(simTime));
+
+        NS_LOG_INFO("Ping application installed on UE " << i);
     }
 }
 
@@ -536,7 +561,7 @@ LogAllNodePositions()
     Simulator::Schedule(Seconds(1.0), &LogAllNodePositions);
 }
 
-// Analyze FlowMonitor results and generate plots
+// Analyze FlowMonitor results and generate separate plots for throughput and latency
 void
 AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper, Ptr<FlowMonitor> flowMonitor, double simTime)
 {
@@ -587,35 +612,55 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper, Ptr<FlowMonitor> flowMonitor, 
                                 ? (double)(totalTxPackets - totalRxPackets) / totalTxPackets * 100.0
                                 : 0.0;
 
-    // Generate consolidated throughput and latency plot
+    // Generate separate throughput and latency plots
     {
-        Gnuplot plot("throughput-latency-time-series.plt");
-        plot.SetTitle("Throughput and Latency Over Time");
-        plot.SetTerminal("png size 800,600");
-        plot.SetLegend("Time (s)", "Value (Kbps / ms)");
+        // Throughput plot
+        Gnuplot plotThroughput("throughput-time-series.plt");
+        plotThroughput.SetTitle("Throughput Over Time");
+        plotThroughput.SetTerminal("png size 800,600");
+        plotThroughput.SetLegend("Time (s)", "Throughput (Kbps)");
         Gnuplot2dDataset datasetThroughput;
         datasetThroughput.SetTitle("Throughput (Kbps)");
         datasetThroughput.SetStyle(Gnuplot2dDataset::LINES_POINTS);
 
+        for (size_t i = 0; i < g_timeSeries.size(); ++i)
+        {
+            datasetThroughput.Add(g_timeSeries[i], g_throughputSeries[i]); // Kbps
+        }
+
+        plotThroughput.AddDataset(datasetThroughput);
+
+        // Set the output to a PNG file for throughput
+        std::ofstream plotFileThroughput("throughput-time-series.plt");
+        plotFileThroughput << "set output 'throughput-time-series.png'\n";
+        plotThroughput.GenerateOutput(plotFileThroughput);
+        plotFileThroughput.close();
+        NS_LOG_INFO("Throughput time-series plot generated.");
+    }
+
+    {
+        // Latency plot
+        Gnuplot plotLatency("latency-time-series.plt");
+        plotLatency.SetTitle("Latency Over Time");
+        plotLatency.SetTerminal("png size 800,600");
+        plotLatency.SetLegend("Time (s)", "Latency (ms)");
         Gnuplot2dDataset datasetLatency;
         datasetLatency.SetTitle("Latency (ms)");
         datasetLatency.SetStyle(Gnuplot2dDataset::LINES_POINTS);
 
         for (size_t i = 0; i < g_timeSeries.size(); ++i)
         {
-            datasetThroughput.Add(g_timeSeries[i], g_throughputSeries[i]); // Kbps
-            datasetLatency.Add(g_timeSeries[i], g_avgLatencySeries[i]);    // ms
+            datasetLatency.Add(g_timeSeries[i], g_avgLatencySeries[i]); // ms
         }
 
-        plot.AddDataset(datasetThroughput);
-        plot.AddDataset(datasetLatency);
+        plotLatency.AddDataset(datasetLatency);
 
-        // Set the output to a PNG file in the current directory
-        std::ofstream plotFile("throughput-latency-time-series.plt");
-        plotFile << "set output 'throughput-latency-time-series.png'\n";
-        plot.GenerateOutput(plotFile);
-        plotFile.close();
-        NS_LOG_INFO("Throughput and latency time-series plot generated.");
+        // Set the output to a PNG file for latency
+        std::ofstream plotFileLatency("latency-time-series.plt");
+        plotFileLatency << "set output 'latency-time-series.png'\n";
+        plotLatency.GenerateOutput(plotFileLatency);
+        plotFileLatency.close();
+        NS_LOG_INFO("Latency time-series plot generated.");
     }
 
     // Log final metrics
@@ -637,9 +682,10 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper, Ptr<FlowMonitor> flowMonitor, 
     mdReport << "- **Avg Latency**   : " << overallAvgLatency << " ms\n";
     mdReport << "- **Packet Loss**   : " << packetLossRate << "%\n\n";
     mdReport << "## Generated Plots\n";
-    mdReport << "- throughput-latency-time-series.png\n\n";
+    mdReport << "- [Throughput Over Time](throughput-time-series.png)\n";
+    mdReport << "- [Latency Over Time](latency-time-series.png)\n\n";
     mdReport << "## FlowMonitor Results\n";
-    mdReport << "FlowMonitor results are saved in flowmon.xml.\n";
+    mdReport << "FlowMonitor results are saved in `flowmon.xml`.\n";
     mdReport.close();
     NS_LOG_INFO("Markdown report generated: simulation-report.md");
 }
