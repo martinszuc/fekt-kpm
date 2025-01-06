@@ -26,9 +26,11 @@
 #include "ns3/network-module.h"
 #include "ns3/packet-sink-helper.h"
 #include "ns3/point-to-point-module.h"
+
 #include <fstream>
-#include <vector>
+#include <limits>
 #include <map>
+#include <vector>
 
 using namespace ns3;
 
@@ -60,7 +62,7 @@ static double g_currentTime = 0.0;
 std::vector<double> g_timeSeries;
 std::vector<std::vector<double>> g_ueThroughputSeries; // [UE][time-slice]
 std::vector<double> g_avgLatencySeries;
-std::vector<double> g_uePacketLossSeries; // [UE]
+std::vector<std::vector<double>> g_uePacketLossSeries; // [UE][time-slice]
 
 // Maps to track flow info for incremental stats
 std::map<FlowId, uint64_t> g_previousRxBytes;
@@ -114,8 +116,8 @@ main(int argc, char* argv[])
     cmd.Parse(argc, argv);
 
     // Prepare data vectors for throughput and packet loss
-    g_ueThroughputSeries.resize(params.numUe);
-    g_uePacketLossSeries.resize(params.numUe, 0.0); // Initialize with 0.0 for each UE
+    g_ueThroughputSeries.resize(params.numUe, std::vector<double>());
+    g_uePacketLossSeries.resize(params.numUe, std::vector<double>());
 
     // Enable logging
     ConfigureLogging();
@@ -237,50 +239,39 @@ main(int argc, char* argv[])
     Ptr<FlowMonitor> flowMonitor = SetupFlowMonitor(flowHelper);
 
     // Prepare incremental stats
-    auto initialStats = flowMonitor->GetFlowStats();
-    Ptr<Ipv4FlowClassifier> classifier =
-        DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+    Simulator::Schedule(Seconds(0.0), [&flowMonitor, &flowHelper, &params]() {
+        auto initialStats = flowMonitor->GetFlowStats();
+        Ptr<Ipv4FlowClassifier> classifier =
+            DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
 
-    // Map flows to UEs
-    for (auto it = initialStats.begin(); it != initialStats.end(); ++it)
-    {
-        g_previousRxBytes[it->first] = 0;
-        g_previousDelaySum[it->first] = Seconds(0);
-        g_previousRxPackets[it->first] = 0;
-
-        Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(it->first);
-        bool foundUe = false;
-
-        for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+        // Map flows to UEs based on destination port
+        for (auto it = initialStats.begin(); it != initialStats.end(); ++it)
         {
-            Ptr<Ipv4> ipv4 = ueNodes.Get(i)->GetObject<Ipv4>();
+            Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(it->first);
+            // Assuming the destination port uniquely identifies the UE
+            uint16_t destPort = t.destinationPort;
+            uint32_t ueIndex = 0;
 
-            // Check all interfaces on this UE
-            for (uint32_t j = 0; j < ipv4->GetNInterfaces(); ++j)
+            if (destPort >= 5000 && destPort < 5000 + params.numUe)
             {
-                Ipv4Address ueIp = ipv4->GetAddress(j, 0).GetLocal();
-
-                // If either the source or destination is the UE's IP,
-                // we map the flow to that UE.
-                if (t.sourceAddress == ueIp || t.destinationAddress == ueIp)
-                {
-                    g_flowIdToUeIndex[it->first] = i;
-                    NS_LOG_INFO("Flow " << it->first << " mapped to UE " << i
-                                        << " (src=" << t.sourceAddress
-                                        << ", dst=" << t.destinationAddress << ")");
-                    foundUe = true;
-                    break;
-                }
+                ueIndex = destPort - 5000;
+                g_flowIdToUeIndex[it->first] = ueIndex;
+                NS_LOG_INFO("Flow " << it->first << " mapped to UE " << ueIndex
+                                    << " (src=" << t.sourceAddress
+                                    << ", dst=" << t.destinationAddress << ":" << destPort << ")");
             }
-            if (foundUe)
-                break;
-        }
+            else
+            {
+                NS_LOG_WARN("Flow " << it->first
+                                    << " has unexpected destination port: " << destPort);
+            }
 
-        if (!foundUe)
-        {
-            NS_LOG_WARN("Flow " << it->first << " could not be mapped to any UE.");
+            // Initialize previous stats
+            g_previousRxBytes[it->first] = 0;
+            g_previousDelaySum[it->first] = Seconds(0);
+            g_previousRxPackets[it->first] = 0;
         }
-    }
+    });
 
     // (Optional) NetAnim
     AnimationInterface* anim = nullptr;
@@ -361,10 +352,18 @@ ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize)
     Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
 
     // Four eNBs at quarter points in the square
-    posAlloc->Add(Vector(areaSize / 4,      areaSize / 4,      30.0));
-    posAlloc->Add(Vector(areaSize / 4,      3 * areaSize / 4,  30.0));
-    posAlloc->Add(Vector(3 * areaSize / 4,  areaSize / 4,      30.0));
-    posAlloc->Add(Vector(3 * areaSize / 4,  3 * areaSize / 4,  30.0));
+    posAlloc->Add(Vector(areaSize / 4, areaSize / 4, 30.0));
+    posAlloc->Add(Vector(areaSize / 4, 3 * areaSize / 4, 30.0));
+    posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 4, 30.0));
+    posAlloc->Add(Vector(3 * areaSize / 4, 3 * areaSize / 4, 30.0));
+
+    // If numEnb > 4, distribute remaining eNBs evenly
+    for (uint16_t i = 4; i < enbNodes.GetN(); ++i)
+    {
+        double x = (i % 2 == 0) ? areaSize / 4 : 3 * areaSize / 4;
+        double y = (i / 2 == 0) ? areaSize / 4 : 3 * areaSize / 4;
+        posAlloc->Add(Vector(x, y, 30.0));
+    }
 
     enbMobility.SetPositionAllocator(posAlloc);
     enbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
@@ -397,7 +396,7 @@ ConfigureUeMobility(NodeContainer& ueNodes, double areaSize)
                                 PointerValue(positionAlloc));
     ueMobility.Install(ueNodes);
 
-    // Force z=1.5 for UEs
+    // Force z=1.5 for UEs and fix Z on movement
     for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
     {
         Ptr<Node> ue = ueNodes.Get(i);
@@ -405,6 +404,7 @@ ConfigureUeMobility(NodeContainer& ueNodes, double areaSize)
         Ptr<RandomWaypointMobilityModel> rwm = DynamicCast<RandomWaypointMobilityModel>(mobility);
         if (rwm)
         {
+            // Connect the "NewPosition" callback to fix the Z coordinate
             rwm->TraceConnectWithoutContext("NewPosition", MakeBoundCallback(&FixZCoordinate, ue));
         }
         Vector pos = mobility->GetPosition();
@@ -466,7 +466,7 @@ InstallVoipApplications(NodeContainer& ueNodes,
 
     for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
     {
-        uint16_t port = basePort + i;
+        uint16_t port = basePort + i; // Unique port per UE
 
         // OnOff -> sending voice data
         OnOffHelper onOff("ns3::UdpSocketFactory", InetSocketAddress(remoteAddr, port));
@@ -487,6 +487,8 @@ InstallVoipApplications(NodeContainer& ueNodes,
         ApplicationContainer sinkApps = sinkHelper.Install(remoteHostContainer.Get(0));
         sinkApps.Start(Seconds(0.5));
         sinkApps.Stop(Seconds(simTime));
+
+        NS_LOG_INFO("Installed VoIP application on UE " << i << " with port " << port);
     }
 }
 
@@ -522,25 +524,36 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
     g_currentTime += params.statsInterval;
     flowMonitor->CheckForLostPackets();
     auto stats = flowMonitor->GetFlowStats();
-    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+    Ptr<Ipv4FlowClassifier> classifier =
+        DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
 
-    // For each UE, track throughput and packet loss
+    // Initialize per-UE throughput and packet loss for this interval
     std::vector<double> ueThroughputKbps(params.numUe, 0.0);
-    std::vector<double> uePacketLossRate(params.numUe, 0.0); // New vector for packet loss
+    std::vector<double> uePacketLossRate(params.numUe, 0.0); // Packet loss rate per UE
+
     double totalLatencySum = 0.0;
     uint64_t totalRxPackets = 0;
 
     for (auto& iter : stats)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(iter.first);
-        if (t.protocol != 17) // only UDP flows
+
+        // Focus only on UDP flows (VoIP)
+        if (t.protocol != 17)
             continue;
 
-        // Identify which UE this flow belongs to
-        uint32_t ueIndex = 0;
-        if (g_flowIdToUeIndex.find(iter.first) != g_flowIdToUeIndex.end())
+        // Identify which UE this flow belongs to based on destination port
+        uint32_t ueIndex = 0xFFFFFFFF; // Invalid index
+        uint16_t destPort = t.destinationPort;
+        if (destPort >= 5000 && destPort < 5000 + params.numUe)
         {
-            ueIndex = g_flowIdToUeIndex[iter.first];
+            ueIndex = destPort - 5000;
+        }
+
+        if (ueIndex >= params.numUe)
+        {
+            NS_LOG_WARN("Flow " << iter.first << " has invalid destination port: " << destPort);
+            continue;
         }
 
         // Throughput calculation
@@ -560,9 +573,9 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
         // Packet Loss Calculation
         uint64_t txPackets = iter.second.txPackets;
         uint64_t rxPackets = iter.second.rxPackets;
-        double lossRate = (txPackets > 0) ?
-            ((double)(txPackets - rxPackets) / txPackets * 100.0) : 0.0;
-        uePacketLossRate[ueIndex] += lossRate; // Aggregate loss rate
+        double lossRate =
+            (txPackets > 0) ? ((double)(txPackets - rxPackets) / txPackets * 100.0) : 0.0;
+        uePacketLossRate[ueIndex] = lossRate; // Assuming one flow per UE
 
         // Latency
         if (deltaPackets > 0)
@@ -575,7 +588,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
 
     // Aggregate stats
     double aggregateThroughputKbps = 0.0;
-    for (uint32_t i = 0; i < params.numUe; ++i)
+    for (uint32_t i = 0; i < params.numUe; i++)
     {
         aggregateThroughputKbps += ueThroughputKbps[i];
     }
@@ -585,16 +598,22 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
     // Store time-series data
     g_timeSeries.push_back(g_currentTime);
     g_avgLatencySeries.push_back(avgLatency);
-    for (uint32_t i = 0; i < params.numUe; ++i)
+    for (uint32_t i = 0; i < params.numUe; i++)
     {
         g_ueThroughputSeries[i].push_back(ueThroughputKbps[i]);
-        g_uePacketLossSeries[i] += uePacketLossRate[i]; // Accumulate loss rates
+        g_uePacketLossSeries[i].push_back(uePacketLossRate[i]);
     }
 
     // Log to console
-    NS_LOG_INFO("Time: " << g_currentTime << "s, "
-                         << "Aggregate Throughput: " << aggregateThroughputKbps << " Kbps, "
-                         << "Avg Latency: " << avgLatency << " ms");
+    std::ostringstream ueThroughputLog;
+    ueThroughputLog << "Time: " << g_currentTime
+                    << "s, Aggregate Throughput: " << aggregateThroughputKbps
+                    << " Kbps, Avg Latency: " << avgLatency << " ms";
+    for (uint32_t i = 0; i < params.numUe; i++)
+    {
+        ueThroughputLog << ", UE" << i << " Throughput: " << ueThroughputKbps[i] << " Kbps";
+    }
+    NS_LOG_INFO(ueThroughputLog.str());
 
     // Schedule next update
     if (g_currentTime + params.statsInterval <= params.simTime)
@@ -643,7 +662,8 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
                    const SimulationParameters params)
 {
     flowMonitor->CheckForLostPackets();
-    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+    Ptr<Ipv4FlowClassifier> classifier =
+        DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
     auto stats = flowMonitor->GetFlowStats();
 
     double totalThroughputSum = 0.0;
@@ -678,77 +698,134 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         totalTxPackets += iter.second.txPackets;
     }
 
-    double overallAvgLatency = (totalRxPackets > 0)
-                                   ? (totalLatencySum / totalRxPackets)
-                                   : 0.0;
-    double overallAvgThroughput = (flowCount > 0)
-                                      ? (totalThroughputSum / flowCount)
-                                      : 0.0;
+    double overallAvgLatency = (totalRxPackets > 0) ? (totalLatencySum / totalRxPackets) : 0.0;
+    double overallAvgThroughput = (flowCount > 0) ? (totalThroughputSum / flowCount) : 0.0;
     double packetLossRate = 0.0;
     if (totalTxPackets > 0)
     {
         packetLossRate = (double)(totalTxPackets - totalRxPackets) / totalTxPackets * 100.0;
     }
 
-    // Generate Gnuplot for throughput over time
-    {
-        Gnuplot plotThroughput("ue-throughput-time-series.plt");
-        plotThroughput.SetTitle("Per-UE Throughput Over Time");
-        plotThroughput.SetTerminal("png size 800,600");
-        plotThroughput.SetLegend("Time (s)", "Throughput (Kbps)");
+    // --------------------------
+    // 1) Generate Gnuplot: Throughput
+    // --------------------------
+    Gnuplot plotThroughput;
+    plotThroughput.SetTitle("Per-UE Throughput Over Time");
+    plotThroughput.SetTerminal("png size 800,600");
+    plotThroughput.SetOutputFilename("ue-throughput-time-series.png");
+    plotThroughput.SetLegend("Time (s)", "Throughput (Kbps)");
 
+    // For each UE, create a dataset
+    for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
+    {
+        std::ostringstream dsName;
+        dsName << "UE-" << ueIndex;
+        Gnuplot2dDataset dsT;
+        dsT.SetTitle(dsName.str());
+        dsT.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+
+        // Fill the dataset from g_timeSeries[] and g_ueThroughputSeries[ueIndex][]
+        size_t steps = std::min(g_timeSeries.size(), g_ueThroughputSeries[ueIndex].size());
+        for (size_t i = 0; i < steps; i++)
+        {
+            double t = g_timeSeries[i];
+            double thr = g_ueThroughputSeries[ueIndex][i];
+            dsT.Add(t, thr);
+        }
+        plotThroughput.AddDataset(dsT);
+    }
+
+    // Write out the Gnuplot script
+    {
+        std::ofstream fileT("ue-throughput-time-series.plt");
+        fileT << "set terminal png size 800,600\n";
+        fileT << "set output 'ue-throughput-time-series.png'\n";
+        fileT << "set title 'Per-UE Throughput Over Time'\n";
+        fileT << "set xlabel 'Time (s)'\n";
+        fileT << "set ylabel 'Throughput (Kbps)'\n";
+        fileT << "set key left top\n";
+        fileT << "plot ";
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
-            std::ostringstream dsName;
-            dsName << "UE-" << ueIndex;
-            Gnuplot2dDataset dsT;
-            dsT.SetTitle(dsName.str());
-            dsT.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+            fileT << "'-' with linespoints title 'UE-" << ueIndex << "'";
+            if (ueIndex != params.numUe - 1)
+                fileT << ", ";
+        }
+        fileT << "\n";
 
-            for (size_t k = 0; k < g_timeSeries.size(); k++)
+        // Write data for each UE
+        for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
+        {
+            for (size_t i = 0; i < g_timeSeries.size(); i++)
             {
-                if (k < g_ueThroughputSeries[ueIndex].size())
+                if (i < g_ueThroughputSeries[ueIndex].size())
                 {
-                    dsT.Add(g_timeSeries[k], g_ueThroughputSeries[ueIndex][k]);
+                    fileT << g_timeSeries[i] << " " << g_ueThroughputSeries[ueIndex][i] << "\n";
+                }
+                else
+                {
+                    fileT << g_timeSeries[i] << " " << 0.0 << "\n";
                 }
             }
-            plotThroughput.AddDataset(dsT);
+            fileT << "e\n";
         }
 
-        std::ofstream fileT("ue-throughput-time-series.plt");
-        // Tell gnuplot to produce a PNG
-        fileT << "set output 'ue-throughput-time-series.png'\n";
-        plotThroughput.GenerateOutput(fileT);
         fileT.close();
-        NS_LOG_INFO("UE Throughput plot: ue-throughput-time-series.png");
+        NS_LOG_INFO("UE Throughput Gnuplot script: ue-throughput-time-series.plt");
+        NS_LOG_INFO("Run `gnuplot ue-throughput-time-series.plt` to generate "
+                    "ue-throughput-time-series.png");
     }
 
-    // Generate Gnuplot for latency over time
+    // --------------------------
+    // 2) Generate Gnuplot: Latency
+    // --------------------------
+    Gnuplot plotLatency;
+    plotLatency.SetTitle("Aggregate Latency Over Time");
+    plotLatency.SetTerminal("png size 800,600");
+    plotLatency.SetOutputFilename("latency-time-series.png");
+    plotLatency.SetLegend("Time (s)", "Latency (ms)");
+
+    // Aggregate latency dataset
+    Gnuplot2dDataset dsL;
+    dsL.SetTitle("Avg Latency (all flows)");
+    dsL.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+
+    for (size_t i = 0; i < g_timeSeries.size(); ++i)
     {
-        Gnuplot plotLatency("latency-time-series.plt");
-        plotLatency.SetTitle("Aggregate Latency Over Time");
-        plotLatency.SetTerminal("png size 800,600");
-        plotLatency.SetLegend("Time (s)", "Latency (ms)");
+        double t = g_timeSeries[i];
+        double lat = g_avgLatencySeries[i];
+        dsL.Add(t, lat);
+    }
+    plotLatency.AddDataset(dsL);
 
-        Gnuplot2dDataset dsL;
-        dsL.SetTitle("Average Latency");
-        dsL.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+    // Write out the Gnuplot script
+    {
+        std::ofstream fileL("latency-time-series.plt");
+        fileL << "set terminal png size 800,600\n";
+        fileL << "set output 'latency-time-series.png'\n";
+        fileL << "set title 'Aggregate Latency Over Time'\n";
+        fileL << "set xlabel 'Time (s)'\n";
+        fileL << "set ylabel 'Latency (ms)'\n";
+        fileL << "set key left top\n";
+        fileL << "plot '-' with linespoints title 'Avg Latency'\n";
 
+        // Write data
         for (size_t i = 0; i < g_timeSeries.size(); ++i)
         {
-            dsL.Add(g_timeSeries[i], g_avgLatencySeries[i]);
+            double t = g_timeSeries[i];
+            double lat = g_avgLatencySeries[i];
+            fileL << t << " " << lat << "\n";
         }
-        plotLatency.AddDataset(dsL);
+        fileL << "e\n";
 
-        std::ofstream fileL("latency-time-series.plt");
-        // Tell gnuplot to produce a PNG
-        fileL << "set output 'latency-time-series.png'\n";
-        plotLatency.GenerateOutput(fileL);
         fileL.close();
-        NS_LOG_INFO("Latency plot: latency-time-series.png");
+        NS_LOG_INFO("Latency Gnuplot script: latency-time-series.plt");
+        NS_LOG_INFO("Run `gnuplot latency-time-series.plt` to generate latency-time-series.png");
     }
 
-    // Log final metrics
+    // --------------------------
+    // 3) Final Logs
+    // --------------------------
     NS_LOG_INFO("===== FINAL METRICS =====");
     NS_LOG_INFO("Avg Throughput (Kbps) : " << overallAvgThroughput);
     NS_LOG_INFO("Avg Latency    (ms)  : " << overallAvgLatency);
@@ -758,27 +835,34 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
     flowMonitor->SerializeToXmlFile("flowmon.xml", true, true);
     NS_LOG_INFO("FlowMonitor results in flowmon.xml.");
 
-    // Markdown summary
+    // --------------------------
+    // 4) Markdown summary
+    // --------------------------
     std::ofstream mdReport("simulation-report.md");
-    mdReport << "# Simulation Report\n\n";
-    mdReport << "**Simulation Time**: " << params.simTime << "s\n\n";
-    mdReport << "## Final Metrics\n";
-    mdReport << "- **Avg Throughput**: " << overallAvgThroughput << " Kbps\n";
-    mdReport << "- **Avg Latency**   : " << overallAvgLatency << " ms\n";
-    mdReport << "- **Packet Loss**   : " << packetLossRate << "%\n\n";
-    mdReport << "## Generated Plots\n";
-    mdReport << "- ue-throughput-time-series.png\n";
-    mdReport << "- latency-time-series.png\n\n";
-    mdReport << "## FlowMonitor Results\n";
-    mdReport << "Stored in `flowmon.xml`.\n";
-    mdReport.close();
-    NS_LOG_INFO("Markdown report: simulation-report.md");
+    if (!mdReport.is_open())
+    {
+        NS_LOG_ERROR("Failed to open simulation-report.md for writing.");
+    }
+    else
+    {
+        mdReport << "# Simulation Report\n\n";
+        mdReport << "**Simulation Time**: " << params.simTime << "s\n\n";
+        mdReport << "## Final Metrics\n";
+        mdReport << "- **Avg Throughput**: " << overallAvgThroughput << " Kbps\n";
+        mdReport << "- **Avg Latency**   : " << overallAvgLatency << " ms\n";
+        mdReport << "- **Packet Loss**   : " << packetLossRate << "%\n\n";
+        mdReport << "## Generated Plots\n";
+        mdReport << "- `ue-throughput-time-series.png`\n";
+        mdReport << "- `latency-time-series.png`\n\n";
+        mdReport << "## FlowMonitor Results\n";
+        mdReport << "Stored in `flowmon.xml`.\n";
+        mdReport.close();
+        NS_LOG_INFO("Markdown report: simulation-report.md");
+    }
 
-    // ----------------------------------
-    // New Code: Export Metrics to CSV
-    // ----------------------------------
-
-    // Open CSV file
+    // --------------------------
+    // 5) CSV Export of Time-Series Data
+    // --------------------------
     std::ofstream csvFile("simulation_metrics.csv");
     if (!csvFile.is_open())
     {
@@ -786,7 +870,7 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         return;
     }
 
-    // Write CSV headers
+    // CSV Header row
     csvFile << "Time(s)";
     for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
     {
@@ -803,37 +887,39 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
     size_t numEntries = g_timeSeries.size();
     for (size_t i = 0; i < numEntries; ++i)
     {
-        csvFile << g_timeSeries[i];
+        double t = g_timeSeries[i];
+        csvFile << t;
+
+        // Throughput
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
+            double thr = 0.0;
             if (i < g_ueThroughputSeries[ueIndex].size())
             {
-                csvFile << "," << g_ueThroughputSeries[ueIndex][i];
+                thr = g_ueThroughputSeries[ueIndex][i];
             }
-            else
-            {
-                csvFile << ",0"; // If data is missing
-            }
+            csvFile << "," << thr;
         }
+
+        // Latency
+        double lat = 0.0;
         if (i < g_avgLatencySeries.size())
         {
-            csvFile << "," << g_avgLatencySeries[i];
+            lat = g_avgLatencySeries[i];
         }
-        else
-        {
-            csvFile << ",0"; // If data is missing
-        }
+        csvFile << "," << lat;
+
+        // Packet Loss
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
-            if (i < g_uePacketLossSeries.size())
+            double loss = 0.0;
+            if (i < g_uePacketLossSeries[ueIndex].size())
             {
-                csvFile << "," << g_uePacketLossSeries[ueIndex];
+                loss = g_uePacketLossSeries[ueIndex][i];
             }
-            else
-            {
-                csvFile << ",0"; // If data is missing
-            }
+            csvFile << "," << loss;
         }
+
         csvFile << "\n";
     }
 
