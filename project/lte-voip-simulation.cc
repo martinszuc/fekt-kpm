@@ -26,6 +26,9 @@
 #include "ns3/network-module.h"
 #include "ns3/packet-sink-helper.h"
 #include "ns3/point-to-point-module.h"
+#include <fstream>
+#include <vector>
+#include <map>
 
 using namespace ns3;
 
@@ -57,6 +60,7 @@ static double g_currentTime = 0.0;
 std::vector<double> g_timeSeries;
 std::vector<std::vector<double>> g_ueThroughputSeries; // [UE][time-slice]
 std::vector<double> g_avgLatencySeries;
+std::vector<double> g_uePacketLossSeries; // [UE]
 
 // Maps to track flow info for incremental stats
 std::map<FlowId, uint64_t> g_previousRxBytes;
@@ -109,8 +113,9 @@ main(int argc, char* argv[])
 
     cmd.Parse(argc, argv);
 
-    // Prepare data vectors for throughput
+    // Prepare data vectors for throughput and packet loss
     g_ueThroughputSeries.resize(params.numUe);
+    g_uePacketLossSeries.resize(params.numUe, 0.0); // Initialize with 0.0 for each UE
 
     // Enable logging
     ConfigureLogging();
@@ -190,8 +195,7 @@ main(int argc, char* argv[])
         {
             Vector enbPos = enbMobilityModel[j]->GetPosition();
             double dist =
-                std::sqrt(std::pow(uePos.x - enbPos.x, 2) +
-                          std::pow(uePos.y - enbPos.y, 2) +
+                std::sqrt(std::pow(uePos.x - enbPos.x, 2) + std::pow(uePos.y - enbPos.y, 2) +
                           std::pow(uePos.z - enbPos.z, 2));
             if (dist < minDistance)
             {
@@ -234,11 +238,10 @@ main(int argc, char* argv[])
 
     // Prepare incremental stats
     auto initialStats = flowMonitor->GetFlowStats();
-    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+    Ptr<Ipv4FlowClassifier> classifier =
+        DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
 
-    // ------------------------------
-    // FIX: Correctly identify flows for each UE by checking both src and dst
-    // ------------------------------
+    // Map flows to UEs
     for (auto it = initialStats.begin(); it != initialStats.end(); ++it)
     {
         g_previousRxBytes[it->first] = 0;
@@ -269,7 +272,13 @@ main(int argc, char* argv[])
                     break;
                 }
             }
-            if (foundUe) break;
+            if (foundUe)
+                break;
+        }
+
+        if (!foundUe)
+        {
+            NS_LOG_WARN("Flow " << it->first << " could not be mapped to any UE.");
         }
     }
 
@@ -515,8 +524,9 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
     auto stats = flowMonitor->GetFlowStats();
     Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
 
-    // For each UE, track throughput
+    // For each UE, track throughput and packet loss
     std::vector<double> ueThroughputKbps(params.numUe, 0.0);
+    std::vector<double> uePacketLossRate(params.numUe, 0.0); // New vector for packet loss
     double totalLatencySum = 0.0;
     uint64_t totalRxPackets = 0;
 
@@ -547,6 +557,13 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
             (deltaBytes * 8.0) / 1000.0 / params.statsInterval; // bits->Kbits
         ueThroughputKbps[ueIndex] += flowThroughputKbps;
 
+        // Packet Loss Calculation
+        uint64_t txPackets = iter.second.txPackets;
+        uint64_t rxPackets = iter.second.rxPackets;
+        double lossRate = (txPackets > 0) ?
+            ((double)(txPackets - rxPackets) / txPackets * 100.0) : 0.0;
+        uePacketLossRate[ueIndex] += lossRate; // Aggregate loss rate
+
         // Latency
         if (deltaPackets > 0)
         {
@@ -571,6 +588,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
     for (uint32_t i = 0; i < params.numUe; ++i)
     {
         g_ueThroughputSeries[i].push_back(ueThroughputKbps[i]);
+        g_uePacketLossSeries[i] += uePacketLossRate[i]; // Accumulate loss rates
     }
 
     // Log to console
@@ -603,8 +621,8 @@ LogAllNodePositions()
         if (mob)
         {
             Vector pos = mob->GetPosition();
-            NS_LOG_INFO("Node " << i << " Position: ("
-                                << pos.x << ", " << pos.y << ", " << pos.z << ")");
+            NS_LOG_INFO("Node " << i << " Position: (" << pos.x << ", " << pos.y << ", " << pos.z
+                                << ")");
         }
         else
         {
@@ -755,4 +773,70 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
     mdReport << "Stored in `flowmon.xml`.\n";
     mdReport.close();
     NS_LOG_INFO("Markdown report: simulation-report.md");
+
+    // ----------------------------------
+    // New Code: Export Metrics to CSV
+    // ----------------------------------
+
+    // Open CSV file
+    std::ofstream csvFile("simulation_metrics.csv");
+    if (!csvFile.is_open())
+    {
+        NS_LOG_ERROR("Failed to open simulation_metrics.csv for writing.");
+        return;
+    }
+
+    // Write CSV headers
+    csvFile << "Time(s)";
+    for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
+    {
+        csvFile << ",UE" << ueIndex << "_Throughput(Kbps)";
+    }
+    csvFile << ",Avg_Latency(ms)";
+    for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
+    {
+        csvFile << ",UE" << ueIndex << "_PacketLoss(%)";
+    }
+    csvFile << "\n";
+
+    // Write data rows
+    size_t numEntries = g_timeSeries.size();
+    for (size_t i = 0; i < numEntries; ++i)
+    {
+        csvFile << g_timeSeries[i];
+        for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
+        {
+            if (i < g_ueThroughputSeries[ueIndex].size())
+            {
+                csvFile << "," << g_ueThroughputSeries[ueIndex][i];
+            }
+            else
+            {
+                csvFile << ",0"; // If data is missing
+            }
+        }
+        if (i < g_avgLatencySeries.size())
+        {
+            csvFile << "," << g_avgLatencySeries[i];
+        }
+        else
+        {
+            csvFile << ",0"; // If data is missing
+        }
+        for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
+        {
+            if (i < g_uePacketLossSeries.size())
+            {
+                csvFile << "," << g_uePacketLossSeries[ueIndex];
+            }
+            else
+            {
+                csvFile << ",0"; // If data is missing
+            }
+        }
+        csvFile << "\n";
+    }
+
+    csvFile.close();
+    NS_LOG_INFO("Simulation metrics exported to simulation_metrics.csv.");
 }
