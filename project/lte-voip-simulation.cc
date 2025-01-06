@@ -109,7 +109,7 @@ main(int argc, char* argv[])
 
     cmd.Parse(argc, argv);
 
-    // Prepare data vectors
+    // Prepare data vectors for throughput
     g_ueThroughputSeries.resize(params.numUe);
 
     // Enable logging
@@ -139,9 +139,9 @@ main(int argc, char* argv[])
     lteHelper->SetSchedulerType("ns3::RrFfMacScheduler");
 
     // Optional handover
-     lteHelper->SetHandoverAlgorithmType("ns3::A3RsrpHandoverAlgorithm");
-     lteHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(3.0));
-     lteHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(120)));
+    lteHelper->SetHandoverAlgorithmType("ns3::A3RsrpHandoverAlgorithm");
+    lteHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(3.0));
+    lteHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(120)));
 
     // Mobility
     ConfigureEnbMobility(enbNodes, params.areaSize);
@@ -190,7 +190,8 @@ main(int argc, char* argv[])
         {
             Vector enbPos = enbMobilityModel[j]->GetPosition();
             double dist =
-                std::sqrt(std::pow(uePos.x - enbPos.x, 2) + std::pow(uePos.y - enbPos.y, 2) +
+                std::sqrt(std::pow(uePos.x - enbPos.x, 2) +
+                          std::pow(uePos.y - enbPos.y, 2) +
                           std::pow(uePos.z - enbPos.z, 2));
             if (dist < minDistance)
             {
@@ -233,8 +234,11 @@ main(int argc, char* argv[])
 
     // Prepare incremental stats
     auto initialStats = flowMonitor->GetFlowStats();
-    Ptr<Ipv4FlowClassifier> classifier =
-        DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+
+    // ------------------------------
+    // FIX: Correctly identify flows for each UE by checking both src and dst
+    // ------------------------------
     for (auto it = initialStats.begin(); it != initialStats.end(); ++it)
     {
         g_previousRxBytes[it->first] = 0;
@@ -243,21 +247,29 @@ main(int argc, char* argv[])
 
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(it->first);
         bool foundUe = false;
+
         for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
         {
             Ptr<Ipv4> ipv4 = ueNodes.Get(i)->GetObject<Ipv4>();
-            for (uint32_t j = 1; j < ipv4->GetNInterfaces(); ++j)
+
+            // Check all interfaces on this UE
+            for (uint32_t j = 0; j < ipv4->GetNInterfaces(); ++j)
             {
-                Ipv4Address addr = ipv4->GetAddress(j, 0).GetLocal();
-                if (addr == t.sourceAddress)
+                Ipv4Address ueIp = ipv4->GetAddress(j, 0).GetLocal();
+
+                // If either the source or destination is the UE's IP,
+                // we map the flow to that UE.
+                if (t.sourceAddress == ueIp || t.destinationAddress == ueIp)
                 {
                     g_flowIdToUeIndex[it->first] = i;
+                    NS_LOG_INFO("Flow " << it->first << " mapped to UE " << i
+                                        << " (src=" << t.sourceAddress
+                                        << ", dst=" << t.destinationAddress << ")");
                     foundUe = true;
                     break;
                 }
             }
-            if (foundUe)
-                break;
+            if (foundUe) break;
         }
     }
 
@@ -317,14 +329,17 @@ main(int argc, char* argv[])
 
 /**
  * Enable logging for specific components.
+ *
+ * IMPORTANT: To suppress unnecessary logs from OnOffApplication and PacketSink,
+ * their logging has been disabled by commenting out the corresponding lines.
  */
 void
 ConfigureLogging()
 {
     LogComponentEnable("EnhancedLteVoipSimulationFixed", LOG_LEVEL_INFO);
-    // Enable more logs as needed
-    LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);
-    LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
+    // Disable logs for OnOffApplication and PacketSink to remove verbose packet logs
+    // LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);
+    // LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
 }
 
 /**
@@ -336,11 +351,11 @@ ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize)
     MobilityHelper enbMobility;
     Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
 
-    // Four eNBs at quarter points
-    posAlloc->Add(Vector(areaSize / 4, areaSize / 4, 30.0));
-    posAlloc->Add(Vector(areaSize / 4, 3 * areaSize / 4, 30.0));
-    posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 4, 30.0));
-    posAlloc->Add(Vector(3 * areaSize / 4, 3 * areaSize / 4, 30.0));
+    // Four eNBs at quarter points in the square
+    posAlloc->Add(Vector(areaSize / 4,      areaSize / 4,      30.0));
+    posAlloc->Add(Vector(areaSize / 4,      3 * areaSize / 4,  30.0));
+    posAlloc->Add(Vector(3 * areaSize / 4,  areaSize / 4,      30.0));
+    posAlloc->Add(Vector(3 * areaSize / 4,  3 * areaSize / 4,  30.0));
 
     enbMobility.SetPositionAllocator(posAlloc);
     enbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
@@ -435,7 +450,7 @@ InstallVoipApplications(NodeContainer& ueNodes,
                         double simTime,
                         NodeContainer& remoteHostContainer)
 {
-    // G.711 ~ 64 kbps => 160-byte frames every 20 ms
+    // G.711 ~ 64 kbps => 160-byte frames every ~20 ms
     uint64_t voiceBitrateBps = 64000; // 64 kbps
     uint32_t packetSizeBytes = 160;
     uint16_t basePort = 5000;
@@ -498,8 +513,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
     g_currentTime += params.statsInterval;
     flowMonitor->CheckForLostPackets();
     auto stats = flowMonitor->GetFlowStats();
-    Ptr<Ipv4FlowClassifier> classifier =
-        DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
 
     // For each UE, track throughput
     std::vector<double> ueThroughputKbps(params.numUe, 0.0);
@@ -509,15 +523,17 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
     for (auto& iter : stats)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(iter.first);
-        if (t.protocol != 17) // only UDP
+        if (t.protocol != 17) // only UDP flows
             continue;
 
+        // Identify which UE this flow belongs to
         uint32_t ueIndex = 0;
         if (g_flowIdToUeIndex.find(iter.first) != g_flowIdToUeIndex.end())
         {
             ueIndex = g_flowIdToUeIndex[iter.first];
         }
 
+        // Throughput calculation
         uint64_t deltaBytes = iter.second.rxBytes - g_previousRxBytes[iter.first];
         g_previousRxBytes[iter.first] = iter.second.rxBytes;
 
@@ -531,6 +547,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
             (deltaBytes * 8.0) / 1000.0 / params.statsInterval; // bits->Kbits
         ueThroughputKbps[ueIndex] += flowThroughputKbps;
 
+        // Latency
         if (deltaPackets > 0)
         {
             double avgFlowLatencyMs = (deltaDelaySum.GetSeconds() / deltaPackets) * 1000.0;
@@ -548,7 +565,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
 
     double avgLatency = (totalRxPackets > 0) ? (totalLatencySum / totalRxPackets) : 0.0;
 
-    // Time-series data
+    // Store time-series data
     g_timeSeries.push_back(g_currentTime);
     g_avgLatencySeries.push_back(avgLatency);
     for (uint32_t i = 0; i < params.numUe; ++i)
@@ -556,11 +573,12 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
         g_ueThroughputSeries[i].push_back(ueThroughputKbps[i]);
     }
 
-    // Log
-    NS_LOG_INFO("Time: " << g_currentTime << "s, Aggregate Throughput: " << aggregateThroughputKbps
-                         << " Kbps, Avg Latency: " << avgLatency << " ms");
+    // Log to console
+    NS_LOG_INFO("Time: " << g_currentTime << "s, "
+                         << "Aggregate Throughput: " << aggregateThroughputKbps << " Kbps, "
+                         << "Avg Latency: " << avgLatency << " ms");
 
-    // Schedule next update if still in simulation
+    // Schedule next update
     if (g_currentTime + params.statsInterval <= params.simTime)
     {
         Simulator::Schedule(Seconds(params.statsInterval),
@@ -585,8 +603,8 @@ LogAllNodePositions()
         if (mob)
         {
             Vector pos = mob->GetPosition();
-            NS_LOG_INFO("Node " << i << " Position: (" << pos.x << ", " << pos.y << ", " << pos.z
-                                << ")");
+            NS_LOG_INFO("Node " << i << " Position: ("
+                                << pos.x << ", " << pos.y << ", " << pos.z << ")");
         }
         else
         {
@@ -607,8 +625,7 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
                    const SimulationParameters params)
 {
     flowMonitor->CheckForLostPackets();
-    Ptr<Ipv4FlowClassifier> classifier =
-        DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
     auto stats = flowMonitor->GetFlowStats();
 
     double totalThroughputSum = 0.0;
@@ -632,6 +649,7 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
             double throughputKbps = (iter.second.rxBytes * 8.0) / 1000.0 / duration;
             totalThroughputSum += throughputKbps;
         }
+
         if (iter.second.rxPackets > 0)
         {
             double avgFlowLatencyMs =
@@ -642,8 +660,12 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         totalTxPackets += iter.second.txPackets;
     }
 
-    double overallAvgLatency = (totalRxPackets > 0) ? (totalLatencySum / totalRxPackets) : 0.0;
-    double overallAvgThroughput = (flowCount > 0) ? (totalThroughputSum / flowCount) : 0.0;
+    double overallAvgLatency = (totalRxPackets > 0)
+                                   ? (totalLatencySum / totalRxPackets)
+                                   : 0.0;
+    double overallAvgThroughput = (flowCount > 0)
+                                      ? (totalThroughputSum / flowCount)
+                                      : 0.0;
     double packetLossRate = 0.0;
     if (totalTxPackets > 0)
     {
@@ -676,6 +698,7 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         }
 
         std::ofstream fileT("ue-throughput-time-series.plt");
+        // Tell gnuplot to produce a PNG
         fileT << "set output 'ue-throughput-time-series.png'\n";
         plotThroughput.GenerateOutput(fileT);
         fileT.close();
@@ -700,6 +723,7 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         plotLatency.AddDataset(dsL);
 
         std::ofstream fileL("latency-time-series.plt");
+        // Tell gnuplot to produce a PNG
         fileL << "set output 'latency-time-series.png'\n";
         plotLatency.GenerateOutput(fileL);
         fileL.close();
