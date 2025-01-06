@@ -29,13 +29,13 @@ struct SimulationParameters
     double areaSize = 200.0;
     bool enableNetAnim = true;
 
-    double voipDataRate = 64.0;
+    double voipDataRate = 512.0;
 
-    double distance0 = 50.0;
-    double distance1 = 200.0;
-    double exponent0 = 2.0;
-    double exponent1 = 3.0;
-    double exponent2 = 3.5;
+    double distance0 = 70.0;
+    double distance1 = 300.0;
+    double exponent0 = 1.5;
+    double exponent1 = 2.0;
+    double exponent2 = 3.0;
 
     double statsInterval = 1.0;
 };
@@ -111,10 +111,13 @@ main(int argc, char* argv[])
     lteHelper->SetPathlossModelAttribute("Exponent1", DoubleValue(params.exponent1));
     lteHelper->SetPathlossModelAttribute("Exponent2", DoubleValue(params.exponent2));
 
+    // Scheduler
+    lteHelper->SetSchedulerType("ns3::RrFfMacScheduler");
+
     // Optional handover
-    lteHelper->SetHandoverAlgorithmType("ns3::A3RsrpHandoverAlgorithm");
-    lteHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(3.0));
-    lteHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(120)));
+    // lteHelper->SetHandoverAlgorithmType("ns3::A3RsrpHandoverAlgorithm");
+    // lteHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(3.0));
+    // lteHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(120)));
 
     // Mobility
     ConfigureEnbMobility(enbNodes, params.areaSize);
