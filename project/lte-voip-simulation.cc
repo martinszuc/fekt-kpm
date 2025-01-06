@@ -72,7 +72,7 @@ std::vector<double> g_avgLatencySeries;
 // We track incremental flow stats so we can compute throughput & jitter over intervals
 std::map<FlowId, uint64_t> g_previousRxBytes;
 std::map<FlowId, Time> g_previousDelaySum;
-std::map<FlowId, Time> g_previousJitterSum;   // new
+std::map<FlowId, Time> g_previousJitterSum; // new
 std::map<FlowId, uint64_t> g_previousRxPackets;
 std::map<FlowId, uint32_t> g_flowIdToUeIndex; // Flow -> UE mapping
 
@@ -205,8 +205,7 @@ main(int argc, char* argv[])
         {
             Vector enbPos = enbMobilityModel[j]->GetPosition();
             double dist =
-                std::sqrt(std::pow(uePos.x - enbPos.x, 2) +
-                          std::pow(uePos.y - enbPos.y, 2) +
+                std::sqrt(std::pow(uePos.x - enbPos.x, 2) + std::pow(uePos.y - enbPos.y, 2) +
                           std::pow(uePos.z - enbPos.z, 2));
             if (dist < minDistance)
             {
@@ -235,9 +234,8 @@ main(int argc, char* argv[])
         Ptr<Ipv4> ipv4 = ueNodes.Get(u)->GetObject<Ipv4>();
         Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(ipv4);
         ueStaticRouting->SetDefaultRoute(epcHelper->GetUeDefaultGatewayAddress(), 1);
-        NS_LOG_INFO("UE " << u
-            << " default route set to "
-            << epcHelper->GetUeDefaultGatewayAddress());
+        NS_LOG_INFO("UE " << u << " default route set to "
+                          << epcHelper->GetUeDefaultGatewayAddress());
     }
 
     // Enable LTE traces
@@ -262,21 +260,19 @@ main(int argc, char* argv[])
                 g_flowIdToUeIndex[it->first] = ueIndex;
                 NS_LOG_INFO("Flow " << it->first << " mapped to UE " << ueIndex
                                     << " (src=" << t.sourceAddress
-                                    << ", dst=" << t.destinationAddress << ":"
-                                    << destPort << ")");
+                                    << ", dst=" << t.destinationAddress << ":" << destPort << ")");
             }
             else
             {
                 NS_LOG_WARN("Flow " << it->first
-                                    << " has unexpected destination port: "
-                                    << destPort);
+                                    << " has unexpected destination port: " << destPort);
             }
 
             // Initialize
-            g_previousRxBytes[it->first]      = 0;
-            g_previousDelaySum[it->first]     = Seconds(0);
-            g_previousJitterSum[it->first]    = Seconds(0); // new
-            g_previousRxPackets[it->first]    = 0;
+            g_previousRxBytes[it->first] = 0;
+            g_previousDelaySum[it->first] = Seconds(0);
+            g_previousJitterSum[it->first] = Seconds(0); // new
+            g_previousRxPackets[it->first] = 0;
         }
     });
 
@@ -392,9 +388,12 @@ ConfigureUeMobility(NodeContainer& ueNodes, double areaSize)
 
     ueMobility.SetPositionAllocator(positionAlloc);
     ueMobility.SetMobilityModel("ns3::RandomWaypointMobilityModel",
-                                "Speed",  StringValue("ns3::UniformRandomVariable[Min=10.0|Max=30.0]"),
-                                "Pause",  StringValue("ns3::ConstantRandomVariable[Constant=2.0]"),
-                                "PositionAllocator", PointerValue(positionAlloc));
+                                "Speed",
+                                StringValue("ns3::UniformRandomVariable[Min=10.0|Max=30.0]"),
+                                "Pause",
+                                StringValue("ns3::ConstantRandomVariable[Constant=2.0]"),
+                                "PositionAllocator",
+                                PointerValue(positionAlloc));
     ueMobility.Install(ueNodes);
 
     // Force z=1.5 for each UE (and keep it that way)
@@ -402,14 +401,12 @@ ConfigureUeMobility(NodeContainer& ueNodes, double areaSize)
     {
         Ptr<Node> ue = ueNodes.Get(i);
         Ptr<MobilityModel> mobility = ue->GetObject<MobilityModel>();
-        Ptr<RandomWaypointMobilityModel> rwm =
-            DynamicCast<RandomWaypointMobilityModel>(mobility);
+        Ptr<RandomWaypointMobilityModel> rwm = DynamicCast<RandomWaypointMobilityModel>(mobility);
 
         if (rwm)
         {
             // Fix Z on every new position
-            rwm->TraceConnectWithoutContext("NewPosition",
-                MakeBoundCallback(&FixZCoordinate, ue));
+            rwm->TraceConnectWithoutContext("NewPosition", MakeBoundCallback(&FixZCoordinate, ue));
         }
         // Also fix Z immediately
         Vector pos = mobility->GetPosition();
@@ -441,7 +438,7 @@ CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
     Ptr<Node> pgw = epcHelper->GetPgwNode();
     PointToPointHelper p2p;
     p2p.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
-    p2p.SetChannelAttribute("Delay",  StringValue("10ms"));
+    p2p.SetChannelAttribute("Delay", StringValue("10ms"));
 
     NetDeviceContainer devices = p2p.Install(pgw, remoteHostContainer.Get(0));
     Ipv4AddressHelper ipv4;
@@ -475,10 +472,10 @@ InstallVoipApplications(NodeContainer& ueNodes,
 
         // OnOff -> sending voice data
         OnOffHelper onOff("ns3::UdpSocketFactory", InetSocketAddress(remoteAddr, port));
-        onOff.SetAttribute("DataRate",  DataRateValue(DataRate(voiceBitrateBps)));
+        onOff.SetAttribute("DataRate", DataRateValue(DataRate(voiceBitrateBps)));
         onOff.SetAttribute("PacketSize", UintegerValue(packetSizeBytes));
         // Always ON
-        onOff.SetAttribute("OnTime",  StringValue("ns3::ConstantRandomVariable[Constant=1]"));
+        onOff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
         onOff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
 
         // Install the "OnOff" on UE i
@@ -493,8 +490,7 @@ InstallVoipApplications(NodeContainer& ueNodes,
         sinkApps.Start(Seconds(0.5));
         sinkApps.Stop(Seconds(simTime));
 
-        NS_LOG_INFO("Installed VoIP application on UE "
-            << i << " with port " << port);
+        NS_LOG_INFO("Installed VoIP application on UE " << i << " with port " << port);
     }
 }
 
@@ -562,16 +558,14 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
             uint64_t deltaBytes = currentRxBytes - g_previousRxBytes[iter.first];
             g_previousRxBytes[iter.first] = currentRxBytes;
 
-            double flowThroughputKbps =
-                (deltaBytes * 8.0) / 1000.0 / params.statsInterval;
+            double flowThroughputKbps = (deltaBytes * 8.0) / 1000.0 / params.statsInterval;
             ueThroughputKbps[ueIndex] += flowThroughputKbps;
 
             // Packet Loss
             uint64_t txPkts = iter.second.txPackets;
             uint64_t rxPkts = iter.second.rxPackets;
-            double lossRate = (txPkts > 0)
-                ? (double)(txPkts - rxPkts) / (double)txPkts * 100.0
-                : 0.0;
+            double lossRate =
+                (txPkts > 0) ? (double)(txPkts - rxPkts) / (double)txPkts * 100.0 : 0.0;
             uePacketLossRate[ueIndex] = lossRate; // One flow per UE assumption
 
             // Latency
@@ -588,21 +582,20 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
             {
                 double avgFlowLatencyMs = (deltaDelaySum.GetSeconds() / deltaPackets) * 1000.0;
                 totalLatencySum += (avgFlowLatencyMs * deltaPackets);
-                totalRxPackets  += deltaPackets;
+                totalRxPackets += deltaPackets;
             }
 
             // Jitter: FlowMonitor stores jitter in "jitterSum"
             //   Mean Jitter for this interval =
             //       (deltaJitterSum / (deltaPackets - 1)) * 1000 [ms]
             Time currentJitterSum = iter.second.jitterSum;
-            Time deltaJitterSum   = currentJitterSum - g_previousJitterSum[iter.first];
+            Time deltaJitterSum = currentJitterSum - g_previousJitterSum[iter.first];
             g_previousJitterSum[iter.first] = currentJitterSum;
 
             double flowJitterMs = 0.0;
             if (deltaPackets > 1)
             {
-                flowJitterMs = (deltaJitterSum.GetSeconds() /
-                                (double)(deltaPackets - 1)) * 1000.0;
+                flowJitterMs = (deltaJitterSum.GetSeconds() / (double)(deltaPackets - 1)) * 1000.0;
             }
             ueJitterMs[ueIndex] += flowJitterMs;
         }
@@ -616,9 +609,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
     }
 
     // Compute average latency
-    double avgLatencyMs = (totalRxPackets > 0)
-        ? (totalLatencySum / totalRxPackets)
-        : 0.0;
+    double avgLatencyMs = (totalRxPackets > 0) ? (totalLatencySum / totalRxPackets) : 0.0;
 
     // Store time series
     g_timeSeries.push_back(g_currentTime);
@@ -660,8 +651,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
 void
 LogAllNodePositions()
 {
-    NS_LOG_INFO("----- Node Positions at "
-        << Simulator::Now().GetSeconds() << "s -----");
+    NS_LOG_INFO("----- Node Positions at " << Simulator::Now().GetSeconds() << "s -----");
     for (uint32_t i = 0; i < NodeList::GetNNodes(); ++i)
     {
         Ptr<Node> node = NodeList::GetNode(i);
@@ -669,8 +659,8 @@ LogAllNodePositions()
         if (mob)
         {
             Vector pos = mob->GetPosition();
-            NS_LOG_INFO("Node " << i << " Position: ("
-                                << pos.x << ", " << pos.y << ", " << pos.z << ")");
+            NS_LOG_INFO("Node " << i << " Position: (" << pos.x << ", " << pos.y << ", " << pos.z
+                                << ")");
         }
         else
         {
@@ -714,8 +704,7 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
             (iter.second.timeLastRxPacket - iter.second.timeFirstTxPacket).GetSeconds();
         if (duration > 0)
         {
-            double throughputKbps =
-                (iter.second.rxBytes * 8.0) / 1000.0 / duration;
+            double throughputKbps = (iter.second.rxBytes * 8.0) / 1000.0 / duration;
             totalThroughputSum += throughputKbps;
         }
 
@@ -723,10 +712,9 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         if (rxPkts > 0)
         {
             // Delay
-            double avgFlowLatencyMs =
-                (iter.second.delaySum.GetSeconds() / (double) rxPkts) * 1000.0;
+            double avgFlowLatencyMs = (iter.second.delaySum.GetSeconds() / (double)rxPkts) * 1000.0;
             totalLatencySum += avgFlowLatencyMs * rxPkts;
-            totalRxPackets  += rxPkts;
+            totalRxPackets += rxPkts;
 
             // Jitter
             if (rxPkts > 1)
@@ -741,23 +729,18 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         totalTxPackets += iter.second.txPackets;
     }
 
-    double overallAvgLatencyMs = (totalRxPackets > 0)
-        ? (totalLatencySum / (double)totalRxPackets)
-        : 0.0;
-    double overallAvgThroughput = (flowCount > 0)
-        ? (totalThroughputSum / (double)flowCount)
-        : 0.0;
+    double overallAvgLatencyMs =
+        (totalRxPackets > 0) ? (totalLatencySum / (double)totalRxPackets) : 0.0;
+    double overallAvgThroughput = (flowCount > 0) ? (totalThroughputSum / (double)flowCount) : 0.0;
     double packetLossRate = 0.0;
     if (totalTxPackets > 0)
     {
-        packetLossRate =
-            (double)(totalTxPackets - totalRxPackets) / (double)totalTxPackets * 100.0;
+        packetLossRate = (double)(totalTxPackets - totalRxPackets) / (double)totalTxPackets * 100.0;
     }
     double overallAvgJitterMs = 0.0;
     if (totalRxPacketsForJitter > 0)
     {
-        overallAvgJitterMs =
-            (totalJitterSum / (double) totalRxPacketsForJitter);
+        overallAvgJitterMs = (totalJitterSum / (double)totalRxPacketsForJitter);
     }
 
     // -------------------------------------------------------
@@ -842,7 +825,7 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
 
     for (size_t i = 0; i < g_timeSeries.size(); ++i)
     {
-        double t   = g_timeSeries[i];
+        double t = g_timeSeries[i];
         double lat = g_avgLatencySeries[i];
         dsL.Add(t, lat);
     }
@@ -861,7 +844,7 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
 
         for (size_t i = 0; i < g_timeSeries.size(); ++i)
         {
-            double t   = g_timeSeries[i];
+            double t = g_timeSeries[i];
             double lat = g_avgLatencySeries[i];
             fileL << t << " " << lat << "\n";
         }
