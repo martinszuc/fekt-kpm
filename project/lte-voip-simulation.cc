@@ -22,13 +22,18 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("EnhancedLteVoipSimulationSimple");
 
 // Global variables for real-time stats
-static double g_statsInterval = 1.0; // <-- MODIFIED: Changed to 1 second
+static double g_statsInterval = 1.0; // Changed to 1 second
 static double g_currentTime = 0.0;
 
 // Time-series data
 std::vector<double> g_timeSeries;
 std::vector<double> g_throughputSeries; // Kbps
 std::vector<double> g_avgLatencySeries; // ms
+
+// Maps to store previous stats for delta calculations
+std::map<FlowId, uint64_t> previousRxBytes;
+std::map<FlowId, Time> previousDelaySum;
+std::map<FlowId, uint64_t> previousRxPackets; // Newly declared
 
 // Function Prototypes
 void ConfigureLogging();
@@ -40,7 +45,8 @@ Ipv4Address CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
 void InstallVoipApplications(NodeContainer& ueNodes,
                              Ipv4Address remoteAddr,
                              double simTime,
-                             NodeContainer& remoteHostContainer);
+                             NodeContainer& remoteHostContainer,
+                             double voipDataRate); // Updated prototype
 Ptr<FlowMonitor> SetupFlowMonitor(FlowMonitorHelper& flowHelper);
 void AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
                         Ptr<FlowMonitor> flowMonitor,
@@ -61,6 +67,7 @@ main(int argc, char* argv[])
     double simTime = 20.0;     // Simulation time in seconds
     double areaSize = 100.0;   // Area size for node distribution (100x100 meters)
     bool enableNetAnim = true; // Enable NetAnim visualization
+    double voipDataRate = 80.0; // Default VoIP DataRate in kbps
 
     // Parse command-line arguments
     CommandLine cmd;
@@ -69,6 +76,7 @@ main(int argc, char* argv[])
     cmd.AddValue("simTime", "Simulation time (s)", simTime);
     cmd.AddValue("areaSize", "Square area for UE random positions [0..areaSize]", areaSize);
     cmd.AddValue("enableNetAnim", "Enable NetAnim animation", enableNetAnim);
+    cmd.AddValue("voipDataRate", "VoIP Data Rate in kbps", voipDataRate); // New argument
     cmd.Parse(argc, argv);
 
     // Configure logging
@@ -85,7 +93,7 @@ main(int argc, char* argv[])
     Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
     lteHelper->SetEpcHelper(epcHelper);
 
-    // <-- MODIFIED: Set the Path Loss Model to ThreeLogDistance + some attribute tuning
+    // Set the Path Loss Model to ThreeLogDistance with attribute tuning
     lteHelper->SetPathlossModelType(
         TypeId::LookupByName("ns3::ThreeLogDistancePropagationLossModel"));
     // Optional attribute tuning:
@@ -124,7 +132,8 @@ main(int argc, char* argv[])
         if (mobility)
         {
             Vector pos = mobility->GetPosition();
-            NS_LOG_INFO("Node " << i << " Position: (" << pos.x << ", " << pos.y << ", " << pos.z << ")");
+            NS_LOG_INFO("Node " << i << " Position: (" << pos.x << ", " << pos.y << ", " << pos.z
+                                << ")");
         }
         else
         {
@@ -186,8 +195,8 @@ main(int argc, char* argv[])
     // Create remote host link
     Ipv4Address remoteHostAddr = CreateRemoteHost(epcHelper, remoteHostContainer, areaSize);
 
-    // Install VoIP applications
-    InstallVoipApplications(ueNodes, remoteHostAddr, simTime, remoteHostContainer);
+    // Install VoIP applications with dynamic DataRate
+    InstallVoipApplications(ueNodes, remoteHostAddr, simTime, remoteHostContainer, voipDataRate);
 
     // Enable LTE traces
     EnableLteTraces(lteHelper);
@@ -195,6 +204,15 @@ main(int argc, char* argv[])
     // Setup FlowMonitor
     FlowMonitorHelper flowHelper;
     Ptr<FlowMonitor> flowMonitor = SetupFlowMonitor(flowHelper);
+
+    // Initialize previous stats maps
+    for (FlowMonitor::FlowStatsContainer::const_iterator i = flowMonitor->GetFlowStats().begin();
+         i != flowMonitor->GetFlowStats().end(); ++i)
+    {
+        previousRxBytes[i->first] = 0;
+        previousDelaySum[i->first] = Seconds(0);
+        previousRxPackets[i->first] = 0; // Initialize previousRxPackets
+    }
 
     // Enable NetAnim (optional)
     AnimationInterface* anim = nullptr;
@@ -260,7 +278,7 @@ ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize)
     MobilityHelper enbMobility;
     Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
 
-    // Place eNodeBs at corners or quarter points
+    // Place eNodeBs at quarter points
     posAlloc->Add(Vector(areaSize / 4, areaSize / 4, 30.0));
     posAlloc->Add(Vector(areaSize / 4, 3 * areaSize / 4, 30.0));
     posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 4, 30.0));
@@ -359,7 +377,8 @@ void
 InstallVoipApplications(NodeContainer& ueNodes,
                         Ipv4Address remoteAddr,
                         double simTime,
-                        NodeContainer& remoteHostContainer)
+                        NodeContainer& remoteHostContainer,
+                        double voipDataRate) // Updated parameter
 {
     uint16_t basePort = 5000;
     for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
@@ -367,7 +386,9 @@ InstallVoipApplications(NodeContainer& ueNodes,
         uint16_t port = basePort + i;
 
         OnOffHelper onOff("ns3::UdpSocketFactory", InetSocketAddress(remoteAddr, port));
-        onOff.SetAttribute("DataRate", StringValue("32kbps")); // Typical VoIP
+        std::ostringstream dataRateStream;
+        dataRateStream << voipDataRate << "kbps";
+        onOff.SetAttribute("DataRate", StringValue(dataRateStream.str())); // Dynamic VoIP DataRate
         onOff.SetAttribute("PacketSize", UintegerValue(160));  // bytes
         onOff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
         onOff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
@@ -417,31 +438,42 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor, FlowMonitorHelper& flowHelper,
     double totalLatencySum = 0.0; // ms
     uint64_t totalRxPackets = 0;
 
-    // Example: show per-flow throughput in logs
+    // Iterate over all flows
     for (auto& iter : stats)
     {
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(iter.first);
         if (t.protocol != 17) // Skip non-UDP
             continue;
 
-        double duration = (iter.second.timeLastRxPacket - iter.second.timeFirstTxPacket).GetSeconds();
-        if (duration > 0)
-        {
-            double flowThroughputKbps = (iter.second.rxBytes * 8.0) / 1000.0 / duration;
-            totalThroughput += flowThroughputKbps;
+        // Calculate delta bytes since last interval
+        uint64_t deltaBytes = iter.second.rxBytes - previousRxBytes[iter.first];
+        previousRxBytes[iter.first] = iter.second.rxBytes;
 
-            NS_LOG_INFO("FlowID=" << iter.first << " ("
-                                  << t.sourceAddress << "->" << t.destinationAddress
-                                  << ") Throughput=" << flowThroughputKbps << " Kbps");
-        }
+        // Calculate delta delaySum since last interval
+        Time deltaDelaySum = iter.second.delaySum - previousDelaySum[iter.first];
+        previousDelaySum[iter.first] = iter.second.delaySum;
 
-        if (iter.second.rxPackets > 0)
+        // Calculate throughput for this interval
+        double flowThroughputKbps = (deltaBytes * 8.0) / 1000.0 / g_statsInterval;
+        totalThroughput += flowThroughputKbps;
+
+        // Log per-flow throughput
+        NS_LOG_INFO("FlowID=" << iter.first << " (" << t.sourceAddress << "->"
+                              << t.destinationAddress << ") Throughput=" << flowThroughputKbps
+                              << " Kbps");
+
+        // Calculate average latency for this interval
+        uint64_t deltaPackets = iter.second.rxPackets - previousRxPackets[iter.first];
+        if (deltaPackets > 0)
         {
             double avgFlowLatency =
-                (iter.second.delaySum.GetSeconds() / iter.second.rxPackets) * 1000.0; // ms
-            totalLatencySum += avgFlowLatency * iter.second.rxPackets;
-            totalRxPackets += iter.second.rxPackets;
+                (deltaDelaySum.GetSeconds() / deltaPackets) * 1000.0; // ms
+            totalLatencySum += (avgFlowLatency * deltaPackets);
+            totalRxPackets += deltaPackets;
         }
+
+        // Update previousRxPackets
+        previousRxPackets[iter.first] = iter.second.rxPackets;
     }
 
     double avgLatency = (totalRxPackets > 0) ? (totalLatencySum / totalRxPackets) : 0.0;
@@ -453,8 +485,8 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor, FlowMonitorHelper& flowHelper,
     g_avgLatencySeries.push_back(avgLatency);
 
     NS_LOG_INFO("Time: " << g_currentTime
-                 << "s, Aggregate Throughput: " << avgThroughput
-                 << " Kbps, Avg Latency: " << avgLatency << " ms");
+             << "s, Aggregate Throughput: " << avgThroughput
+             << " Kbps, Avg Latency: " << avgLatency << " ms");
 
     if (g_currentTime + g_statsInterval <= simTime)
     {
@@ -478,7 +510,8 @@ LogAllNodePositions()
         if (mobility)
         {
             Vector pos = mobility->GetPosition();
-            NS_LOG_INFO("Node " << i << " Position: (" << pos.x << ", " << pos.y << ", " << pos.z << ")");
+            NS_LOG_INFO("Node " << i << " Position: (" << pos.x << ", " << pos.y << ", " << pos.z
+                                << ")");
         }
         else
         {
@@ -533,35 +566,53 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper, Ptr<FlowMonitor> flowMonitor, 
                                 ? (double)(totalTxPackets - totalRxPackets) / totalTxPackets * 100.0
                                 : 0.0;
 
-    // Generate time-series plot
+    // Generate separate throughput and latency plots
+    // ---- 1) Throughput Plot ----
     {
-        Gnuplot plot("throughput-latency-time-series.plt");
-        plot.SetTitle("Throughput and Latency Over Time");
-        plot.SetTerminal("png size 800,600");
-        plot.SetLegend("Time (s)", "Value");
-        Gnuplot2dDataset datasetThroughput;
-        datasetThroughput.SetTitle("Throughput (Kbps)");
-        datasetThroughput.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+        Gnuplot plotThroughput("throughput-time-series.plt");
+        plotThroughput.SetTitle("Throughput Over Time");
+        plotThroughput.SetTerminal("png size 800,600");
+        plotThroughput.SetLegend("Time (s)", "Throughput (Kbps)");
 
-        Gnuplot2dDataset datasetLatency;
-        datasetLatency.SetTitle("Latency (ms)");
-        datasetLatency.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+        Gnuplot2dDataset dsT;
+        dsT.SetTitle("Aggregate Throughput");
+        dsT.SetStyle(Gnuplot2dDataset::LINES_POINTS);
 
         for (size_t i = 0; i < g_timeSeries.size(); ++i)
         {
-            datasetThroughput.Add(g_timeSeries[i], g_throughputSeries[i]);
-            datasetLatency.Add(g_timeSeries[i], g_avgLatencySeries[i]);
+            dsT.Add(g_timeSeries[i], g_throughputSeries[i]);
         }
+        plotThroughput.AddDataset(dsT);
 
-        plot.AddDataset(datasetThroughput);
-        plot.AddDataset(datasetLatency);
+        std::ofstream fileT("throughput-time-series.plt");
+        fileT << "set output 'throughput-time-series.png'\n";
+        plotThroughput.GenerateOutput(fileT);
+        fileT.close();
+        NS_LOG_INFO("Throughput time-series plot generated: throughput-time-series.png");
+    }
 
-        // Save to file
-        std::ofstream plotFile("throughput-latency-time-series.plt");
-        plotFile << "set output 'throughput-latency-time-series.png'\n";
-        plot.GenerateOutput(plotFile);
-        plotFile.close();
-        NS_LOG_INFO("Throughput and latency time-series plot generated.");
+    // ---- 2) Latency Plot ----
+    {
+        Gnuplot plotLatency("latency-time-series.plt");
+        plotLatency.SetTitle("Latency Over Time");
+        plotLatency.SetTerminal("png size 800,600");
+        plotLatency.SetLegend("Time (s)", "Latency (ms)");
+
+        Gnuplot2dDataset dsL;
+        dsL.SetTitle("Average Latency");
+        dsL.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+
+        for (size_t i = 0; i < g_timeSeries.size(); ++i)
+        {
+            dsL.Add(g_timeSeries[i], g_avgLatencySeries[i]);
+        }
+        plotLatency.AddDataset(dsL);
+
+        std::ofstream fileL("latency-time-series.plt");
+        fileL << "set output 'latency-time-series.png'\n";
+        plotLatency.GenerateOutput(fileL);
+        fileL.close();
+        NS_LOG_INFO("Latency time-series plot generated: latency-time-series.png");
     }
 
     // Log final metrics
@@ -570,8 +621,9 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper, Ptr<FlowMonitor> flowMonitor, 
     NS_LOG_INFO("Avg Latency   : " << overallAvgLatency << " ms");
     NS_LOG_INFO("Packet Loss   : " << packetLossRate << "%");
 
+    // Serialize FlowMonitor results
     flowMonitor->SerializeToXmlFile("flowmon.xml", true, true);
-    NS_LOG_INFO("FlowMonitor results saved to XML.");
+    NS_LOG_INFO("FlowMonitor results saved to flowmon.xml.");
 
     // Generate Markdown report
     std::ofstream mdReport("simulation-report.md");
@@ -582,7 +634,8 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper, Ptr<FlowMonitor> flowMonitor, 
     mdReport << "- **Avg Latency**   : " << overallAvgLatency << " ms\n";
     mdReport << "- **Packet Loss**   : " << packetLossRate << "%\n\n";
     mdReport << "## Generated Plots\n";
-    mdReport << "- throughput-latency-time-series.png\n\n";
+    mdReport << "- throughput-time-series.png\n";
+    mdReport << "- latency-time-series.png\n\n";
     mdReport << "## FlowMonitor Results\n";
     mdReport << "FlowMonitor results are saved in flowmon.xml.\n";
     mdReport.close();
