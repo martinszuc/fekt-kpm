@@ -543,47 +543,41 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
             continue;
 
         // Identify which UE this flow belongs to based on destination port
-        uint32_t ueIndex = 0xFFFFFFFF; // Invalid index
         uint16_t destPort = t.destinationPort;
         if (destPort >= 5000 && destPort < 5000 + params.numUe)
         {
-            ueIndex = destPort - 5000;
+            uint32_t ueIndex = destPort - 5000;
+
+            // Throughput calculation
+            uint64_t deltaBytes = iter.second.rxBytes - g_previousRxBytes[iter.first];
+            g_previousRxBytes[iter.first] = iter.second.rxBytes;
+
+            Time deltaDelaySum = iter.second.delaySum - g_previousDelaySum[iter.first];
+            g_previousDelaySum[iter.first] = iter.second.delaySum;
+
+            uint64_t deltaPackets = iter.second.rxPackets - g_previousRxPackets[iter.first];
+            g_previousRxPackets[iter.first] = iter.second.rxPackets;
+
+            double flowThroughputKbps =
+                (deltaBytes * 8.0) / 1000.0 / params.statsInterval; // bits->Kbits
+            ueThroughputKbps[ueIndex] += flowThroughputKbps;
+
+            // Packet Loss Calculation
+            uint64_t txPackets = iter.second.txPackets;
+            uint64_t rxPackets = iter.second.rxPackets;
+            double lossRate =
+                (txPackets > 0) ? ((double)(txPackets - rxPackets) / txPackets * 100.0) : 0.0;
+            uePacketLossRate[ueIndex] = lossRate; // Assuming one flow per UE
+
+            // Latency
+            if (deltaPackets > 0)
+            {
+                double avgFlowLatencyMs = (deltaDelaySum.GetSeconds() / deltaPackets) * 1000.0;
+                totalLatencySum += (avgFlowLatencyMs * deltaPackets);
+                totalRxPackets += deltaPackets;
+            }
         }
-
-        if (ueIndex >= params.numUe)
-        {
-            NS_LOG_WARN("Flow " << iter.first << " has invalid destination port: " << destPort);
-            continue;
-        }
-
-        // Throughput calculation
-        uint64_t deltaBytes = iter.second.rxBytes - g_previousRxBytes[iter.first];
-        g_previousRxBytes[iter.first] = iter.second.rxBytes;
-
-        Time deltaDelaySum = iter.second.delaySum - g_previousDelaySum[iter.first];
-        g_previousDelaySum[iter.first] = iter.second.delaySum;
-
-        uint64_t deltaPackets = iter.second.rxPackets - g_previousRxPackets[iter.first];
-        g_previousRxPackets[iter.first] = iter.second.rxPackets;
-
-        double flowThroughputKbps =
-            (deltaBytes * 8.0) / 1000.0 / params.statsInterval; // bits->Kbits
-        ueThroughputKbps[ueIndex] += flowThroughputKbps;
-
-        // Packet Loss Calculation
-        uint64_t txPackets = iter.second.txPackets;
-        uint64_t rxPackets = iter.second.rxPackets;
-        double lossRate =
-            (txPackets > 0) ? ((double)(txPackets - rxPackets) / txPackets * 100.0) : 0.0;
-        uePacketLossRate[ueIndex] = lossRate; // Assuming one flow per UE
-
-        // Latency
-        if (deltaPackets > 0)
-        {
-            double avgFlowLatencyMs = (deltaDelaySum.GetSeconds() / deltaPackets) * 1000.0;
-            totalLatencySum += (avgFlowLatencyMs * deltaPackets);
-            totalRxPackets += deltaPackets;
-        }
+        // Else, it's an unintended flow; ignore without logging a warning
     }
 
     // Aggregate stats
