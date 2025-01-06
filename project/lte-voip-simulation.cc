@@ -21,31 +21,25 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("EnhancedLteVoipSimulationSimple");
 
-//------------------------------------------------------------------------------
-// 1) Global / Simulation Parameters Structure
-//------------------------------------------------------------------------------
 struct SimulationParameters
 {
-  uint16_t numEnb = 4;
-  uint16_t numUe = 5;
-  double simTime = 20.0;
-  double areaSize = 200.0;
-  bool enableNetAnim = true;
+    uint16_t numEnb = 4;
+    uint16_t numUe = 5;
+    double simTime = 20.0;
+    double areaSize = 200.0;
+    bool enableNetAnim = true;
 
-  double voipDataRate = 64.0;
+    double voipDataRate = 64.0;
 
-  double distance0 = 50.0;
-  double distance1 = 200.0;
-  double exponent0 = 2.0;
-  double exponent1 = 3.0;
-  double exponent2 = 3.5;
+    double distance0 = 50.0;
+    double distance1 = 200.0;
+    double exponent0 = 2.0;
+    double exponent1 = 3.0;
+    double exponent2 = 3.5;
 
-  double statsInterval = 1.0;
+    double statsInterval = 1.0;
 };
 
-//------------------------------------------------------------------------------
-// Global variables
-//------------------------------------------------------------------------------
 static double g_currentTime = 0.0;
 std::vector<double> g_timeSeries;
 std::vector<std::vector<double>> g_ueThroughputSeries;
@@ -55,7 +49,6 @@ std::map<FlowId, Time> g_previousDelaySum;
 std::map<FlowId, uint64_t> g_previousRxPackets;
 std::map<FlowId, uint32_t> g_flowIdToUeIndex;
 
-//------------------------------------------------------------------------------
 void ConfigureLogging();
 void ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize);
 void ConfigureUeMobility(NodeContainer& ueNodes, double areaSize);
@@ -78,24 +71,22 @@ void AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
                         Ptr<FlowMonitor> flowMonitor,
                         const SimulationParameters params);
 
-//------------------------------------------------------------------------------
 int
 main(int argc, char* argv[])
 {
     SimulationParameters params;
-
     CommandLine cmd;
-    cmd.AddValue("numEnb",         "Number of eNodeBs", params.numEnb);
-    cmd.AddValue("numUe",          "Number of UEs", params.numUe);
-    cmd.AddValue("simTime",        "Simulation time (s)", params.simTime);
-    cmd.AddValue("areaSize",       "Square area [0..areaSize]", params.areaSize);
-    cmd.AddValue("enableNetAnim",  "Enable NetAnim animation", params.enableNetAnim);
-    cmd.AddValue("voipDataRate",   "VoIP Data Rate in kbps", params.voipDataRate);
-    cmd.AddValue("distance0",      "PathLoss Distance0", params.distance0);
-    cmd.AddValue("distance1",      "PathLoss Distance1", params.distance1);
-    cmd.AddValue("exponent0",      "PathLoss Exponent0", params.exponent0);
-    cmd.AddValue("exponent1",      "PathLoss Exponent1", params.exponent1);
-    cmd.AddValue("exponent2",      "PathLoss Exponent2", params.exponent2);
+    cmd.AddValue("numEnb", "Number of eNodeBs", params.numEnb);
+    cmd.AddValue("numUe", "Number of UEs", params.numUe);
+    cmd.AddValue("simTime", "Simulation time (s)", params.simTime);
+    cmd.AddValue("areaSize", "Square area [0..areaSize]", params.areaSize);
+    cmd.AddValue("enableNetAnim", "Enable NetAnim animation", params.enableNetAnim);
+    cmd.AddValue("voipDataRate", "VoIP Data Rate in kbps", params.voipDataRate);
+    cmd.AddValue("distance0", "PathLoss Distance0", params.distance0);
+    cmd.AddValue("distance1", "PathLoss Distance1", params.distance1);
+    cmd.AddValue("exponent0", "PathLoss Exponent0", params.exponent0);
+    cmd.AddValue("exponent1", "PathLoss Exponent1", params.exponent1);
+    cmd.AddValue("exponent2", "PathLoss Exponent2", params.exponent2);
     cmd.Parse(argc, argv);
 
     g_ueThroughputSeries.resize(params.numUe);
@@ -111,7 +102,7 @@ main(int argc, char* argv[])
     Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
     lteHelper->SetEpcHelper(epcHelper);
 
-    // Path loss model
+    // Path loss
     lteHelper->SetPathlossModelType(
         TypeId::LookupByName("ns3::ThreeLogDistancePropagationLossModel"));
     lteHelper->SetPathlossModelAttribute("Distance0", DoubleValue(params.distance0));
@@ -127,29 +118,31 @@ main(int argc, char* argv[])
 
     // Mobility
     ConfigureEnbMobility(enbNodes, params.areaSize);
-    ConfigureUeMobility(ueNodes,   params.areaSize);
+    ConfigureUeMobility(ueNodes, params.areaSize);
 
+    // RemoteHost
     MobilityHelper remoteMobility;
     remoteMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     remoteMobility.Install(remoteHostContainer.Get(0));
     remoteHostContainer.Get(0)->GetObject<MobilityModel>()->SetPosition(
         Vector(params.areaSize / 2, params.areaSize / 2, 1.5));
 
+    // PGW
     remoteMobility.Install(epcHelper->GetPgwNode());
     epcHelper->GetPgwNode()->GetObject<MobilityModel>()->SetPosition(
         Vector(params.areaSize / 2, params.areaSize / 2, 1.5));
 
-    // Install LTE devices
+    // Devices
     NetDeviceContainer enbDevs = lteHelper->InstallEnbDevice(enbNodes);
-    NetDeviceContainer ueDevs  = lteHelper->InstallUeDevice(ueNodes);
+    NetDeviceContainer ueDevs = lteHelper->InstallUeDevice(ueNodes);
 
-    // Internet stack
+    // Internet
     InternetStackHelper internet;
     internet.Install(ueNodes);
     internet.Install(remoteHostContainer);
     internet.Install(epcHelper->GetPgwNode());
 
-    // Assign IP addresses
+    // IP addresses
     epcHelper->AssignUeIpv4Address(ueDevs);
 
     // Attach UEs to nearest eNB
@@ -169,8 +162,7 @@ main(int argc, char* argv[])
         {
             Vector enbPos = enbMobilityModel[j]->GetPosition();
             double distance =
-                std::sqrt(std::pow(uePos.x - enbPos.x, 2) +
-                          std::pow(uePos.y - enbPos.y, 2) +
+                std::sqrt(std::pow(uePos.x - enbPos.x, 2) + std::pow(uePos.y - enbPos.y, 2) +
                           std::pow(uePos.z - enbPos.z, 2));
             if (distance < minDistance)
             {
@@ -180,36 +172,41 @@ main(int argc, char* argv[])
         }
         lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(closestEnb));
 
-        // Ensure UEs have z=1.5
+        // Force z=1.5
         Vector pos = ueMobility->GetPosition();
         if (pos.z != 1.5)
         {
             pos.z = 1.5;
             ueMobility->SetPosition(pos);
-            NS_LOG_WARN("UE " << i << " z-coordinate set to 1.5 meters after attachment.");
+            NS_LOG_WARN("UE " << i << " z-coordinate set to 1.5 after attachment.");
         }
     }
 
     // Create remote host link
     Ipv4Address remoteHostAddr = CreateRemoteHost(epcHelper, remoteHostContainer, params.areaSize);
 
-    // Install VoIP apps
-    InstallVoipApplications(ueNodes, remoteHostAddr, params.simTime,
-                            remoteHostContainer, params.voipDataRate);
+    // VoIP
+    InstallVoipApplications(ueNodes,
+                            remoteHostAddr,
+                            params.simTime,
+                            remoteHostContainer,
+                            params.voipDataRate);
 
+    // Traces
     EnableLteTraces(lteHelper);
 
     // FlowMonitor
     FlowMonitorHelper flowHelper;
     Ptr<FlowMonitor> flowMonitor = SetupFlowMonitor(flowHelper);
 
-    // Initialize stats
+    // Init stats
     auto initialStats = flowMonitor->GetFlowStats();
-    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+    Ptr<Ipv4FlowClassifier> classifier =
+        DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
     for (auto it = initialStats.begin(); it != initialStats.end(); ++it)
     {
-        g_previousRxBytes[it->first]   = 0;
-        g_previousDelaySum[it->first]  = Seconds(0);
+        g_previousRxBytes[it->first] = 0;
+        g_previousDelaySum[it->first] = Seconds(0);
         g_previousRxPackets[it->first] = 0;
 
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(it->first);
@@ -227,11 +224,12 @@ main(int argc, char* argv[])
                     break;
                 }
             }
-            if (foundUe) break;
+            if (foundUe)
+                break;
         }
     }
 
-    // NetAnim
+    // (Optional) NetAnim
     AnimationInterface* anim = nullptr;
     if (params.enableNetAnim)
     {
@@ -279,7 +277,6 @@ main(int argc, char* argv[])
     return 0;
 }
 
-//------------------------------------------------------------------------------
 void
 ConfigureLogging()
 {
@@ -288,23 +285,24 @@ ConfigureLogging()
     LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
 }
 
-//------------------------------------------------------------------------------
+// HERE is the 4-eNB layout
 void
 ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize)
 {
+    // For 4 eNB nodes at quarter points
     MobilityHelper enbMobility;
     Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
 
-    // Two eNBs near the corners
-    posAlloc->Add(Vector(areaSize / 4,       areaSize / 4,       30.0));
-    posAlloc->Add(Vector(3 * areaSize / 4,   3 * areaSize / 4,   30.0));
+    posAlloc->Add(Vector(areaSize / 4, areaSize / 4, 30.0));
+    posAlloc->Add(Vector(areaSize / 4, 3 * areaSize / 4, 30.0));
+    posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 4, 30.0));
+    posAlloc->Add(Vector(3 * areaSize / 4, 3 * areaSize / 4, 30.0));
 
     enbMobility.SetPositionAllocator(posAlloc);
     enbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     enbMobility.Install(enbNodes);
 }
 
-//------------------------------------------------------------------------------
 void
 ConfigureUeMobility(NodeContainer& ueNodes, double areaSize)
 {
@@ -312,7 +310,7 @@ ConfigureUeMobility(NodeContainer& ueNodes, double areaSize)
     Ptr<RandomRectanglePositionAllocator> positionAlloc =
         CreateObject<RandomRectanglePositionAllocator>();
 
-    // Use [0..areaSize] for X & Y so UEs can roam entire area
+    // Let them roam in [0..areaSize]
     std::ostringstream xBound, yBound;
     xBound << "ns3::UniformRandomVariable[Min=0.0|Max=" << areaSize << "]";
     yBound << "ns3::UniformRandomVariable[Min=0.0|Max=" << areaSize << "]";
@@ -321,9 +319,12 @@ ConfigureUeMobility(NodeContainer& ueNodes, double areaSize)
 
     ueMobility.SetPositionAllocator(positionAlloc);
     ueMobility.SetMobilityModel("ns3::RandomWaypointMobilityModel",
-        "Speed",  StringValue("ns3::UniformRandomVariable[Min=10.0|Max=30.0]"),
-        "Pause",  StringValue("ns3::ConstantRandomVariable[Constant=2.0]"),
-        "PositionAllocator", PointerValue(positionAlloc));
+                                "Speed",
+                                StringValue("ns3::UniformRandomVariable[Min=10.0|Max=30.0]"),
+                                "Pause",
+                                StringValue("ns3::ConstantRandomVariable[Constant=2.0]"),
+                                "PositionAllocator",
+                                PointerValue(positionAlloc));
     ueMobility.Install(ueNodes);
 
     for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
@@ -341,7 +342,6 @@ ConfigureUeMobility(NodeContainer& ueNodes, double areaSize)
     }
 }
 
-//------------------------------------------------------------------------------
 void
 FixZCoordinate(Ptr<Node> node)
 {
@@ -351,7 +351,6 @@ FixZCoordinate(Ptr<Node> node)
     mobility->SetPosition(pos);
 }
 
-//------------------------------------------------------------------------------
 Ipv4Address
 CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
                  NodeContainer& remoteHostContainer,
@@ -360,7 +359,7 @@ CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
     Ptr<Node> pgw = epcHelper->GetPgwNode();
     PointToPointHelper p2p;
     p2p.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
-    p2p.SetChannelAttribute("Delay",  StringValue("10ms"));
+    p2p.SetChannelAttribute("Delay", StringValue("10ms"));
 
     NetDeviceContainer devices = p2p.Install(pgw, remoteHostContainer.Get(0));
     Ipv4AddressHelper ipv4;
@@ -376,16 +375,14 @@ CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
     MobilityHelper pgwMobility;
     pgwMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     pgwMobility.Install(pgw);
-    pgw->GetObject<MobilityModel>()->SetPosition(
-        Vector(areaSize / 2, areaSize / 2, 1.5));
+    pgw->GetObject<MobilityModel>()->SetPosition(Vector(areaSize / 2, areaSize / 2, 1.5));
 
-    p2p.EnablePcap("pgw-p2p",          devices.Get(0), true);
-    p2p.EnablePcap("remote-host-p2p",  devices.Get(1), true);
+    p2p.EnablePcap("pgw-p2p", devices.Get(0), true);
+    p2p.EnablePcap("remote-host-p2p", devices.Get(1), true);
 
     return interfaces.GetAddress(1);
 }
 
-//------------------------------------------------------------------------------
 void
 InstallVoipApplications(NodeContainer& ueNodes,
                         Ipv4Address remoteAddr,
@@ -401,18 +398,18 @@ InstallVoipApplications(NodeContainer& ueNodes,
         OnOffHelper onOff("ns3::UdpSocketFactory", InetSocketAddress(remoteAddr, port));
         std::ostringstream dataRateStream;
         dataRateStream << voipDataRate << "kbps";
-        onOff.SetAttribute("DataRate",   StringValue(dataRateStream.str()));
+        onOff.SetAttribute("DataRate", StringValue(dataRateStream.str()));
         onOff.SetAttribute("PacketSize", UintegerValue(160));
 
-        // Keep the sender ON for the entire simulation (e.g. OnTime=1000s)
-        onOff.SetAttribute("OnTime",  StringValue("ns3::ConstantRandomVariable[Constant=1000]"));
+        // Keep the sender ON for the entire sim
+        onOff.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1000]"));
         onOff.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
 
         ApplicationContainer apps = onOff.Install(ueNodes.Get(i));
         apps.Start(Seconds(1.0));
         apps.Stop(Seconds(simTime));
 
-        // Sink on the remote host
+        // Sink
         PacketSinkHelper packetSink("ns3::UdpSocketFactory",
                                     InetSocketAddress(Ipv4Address::GetAny(), port));
         ApplicationContainer sinkApps = packetSink.Install(remoteHostContainer.Get(0));
@@ -421,7 +418,6 @@ InstallVoipApplications(NodeContainer& ueNodes,
     }
 }
 
-//------------------------------------------------------------------------------
 Ptr<FlowMonitor>
 SetupFlowMonitor(FlowMonitorHelper& flowHelper)
 {
@@ -429,7 +425,6 @@ SetupFlowMonitor(FlowMonitorHelper& flowHelper)
     return flowMonitor;
 }
 
-//------------------------------------------------------------------------------
 void
 EnableLteTraces(Ptr<LteHelper> lteHelper)
 {
@@ -439,7 +434,6 @@ EnableLteTraces(Ptr<LteHelper> lteHelper)
     lteHelper->EnablePdcpTraces();
 }
 
-//------------------------------------------------------------------------------
 void
 PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
                     FlowMonitorHelper& flowHelper,
@@ -448,7 +442,8 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
     g_currentTime += params.statsInterval;
     flowMonitor->CheckForLostPackets();
     auto stats = flowMonitor->GetFlowStats();
-    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+    Ptr<Ipv4FlowClassifier> classifier =
+        DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
 
     std::vector<double> ueThroughputKbps(params.numUe, 0.0);
     double totalLatencySum = 0.0;
@@ -466,7 +461,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
             ueIndex = g_flowIdToUeIndex[iter.first];
         }
 
-        uint64_t deltaBytes   = iter.second.rxBytes - g_previousRxBytes[iter.first];
+        uint64_t deltaBytes = iter.second.rxBytes - g_previousRxBytes[iter.first];
         g_previousRxBytes[iter.first] = iter.second.rxBytes;
 
         Time deltaDelaySum = iter.second.delaySum - g_previousDelaySum[iter.first];
@@ -475,14 +470,12 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
         uint64_t deltaPackets = iter.second.rxPackets - g_previousRxPackets[iter.first];
         g_previousRxPackets[iter.first] = iter.second.rxPackets;
 
-        double flowThroughputKbps =
-            (deltaBytes * 8.0) / 1000.0 / params.statsInterval;
+        double flowThroughputKbps = (deltaBytes * 8.0) / 1000.0 / params.statsInterval;
         ueThroughputKbps[ueIndex] += flowThroughputKbps;
 
         if (deltaPackets > 0)
         {
-            double avgFlowLatencyMs =
-                (deltaDelaySum.GetSeconds() / deltaPackets) * 1000.0;
+            double avgFlowLatencyMs = (deltaDelaySum.GetSeconds() / deltaPackets) * 1000.0;
             totalLatencySum += (avgFlowLatencyMs * deltaPackets);
             totalRxPackets += deltaPackets;
         }
@@ -494,9 +487,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
         aggregateThroughputKbps += ueThroughputKbps[i];
     }
 
-    double avgLatency = (totalRxPackets > 0)
-        ? (totalLatencySum / totalRxPackets)
-        : 0.0;
+    double avgLatency = (totalRxPackets > 0) ? (totalLatencySum / totalRxPackets) : 0.0;
 
     g_timeSeries.push_back(g_currentTime);
     g_avgLatencySeries.push_back(avgLatency);
@@ -506,9 +497,8 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
         g_ueThroughputSeries[i].push_back(ueThroughputKbps[i]);
     }
 
-    NS_LOG_INFO("Time: " << g_currentTime
-                 << "s, Aggregate Thpt: " << aggregateThroughputKbps
-                 << " Kbps, Avg Latency: " << (avgLatency) << " ms");
+    NS_LOG_INFO("Time: " << g_currentTime << "s, Aggregate Thpt: " << aggregateThroughputKbps
+                         << " Kbps, Avg Latency: " << avgLatency << " ms");
 
     if (g_currentTime + params.statsInterval <= params.simTime)
     {
@@ -520,7 +510,6 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
     }
 }
 
-//------------------------------------------------------------------------------
 void
 LogAllNodePositions()
 {
@@ -532,10 +521,8 @@ LogAllNodePositions()
         if (mobility)
         {
             Vector pos = mobility->GetPosition();
-            NS_LOG_INFO("Node " << i << " Position: ("
-                                << pos.x << ", "
-                                << pos.y << ", "
-                                << pos.z << ")");
+            NS_LOG_INFO("Node " << i << " Position: (" << pos.x << ", " << pos.y << ", " << pos.z
+                                << ")");
         }
         else
         {
@@ -546,21 +533,21 @@ LogAllNodePositions()
     Simulator::Schedule(Seconds(1.0), &LogAllNodePositions);
 }
 
-//------------------------------------------------------------------------------
 void
 AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
                    Ptr<FlowMonitor> flowMonitor,
                    const SimulationParameters params)
 {
     flowMonitor->CheckForLostPackets();
-    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+    Ptr<Ipv4FlowClassifier> classifier =
+        DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
     auto stats = flowMonitor->GetFlowStats();
 
     double totalThroughputSum = 0.0;
-    double totalLatencySum    = 0.0;
-    uint64_t totalRxPackets   = 0;
-    uint64_t totalTxPackets   = 0;
-    uint32_t flowCount        = 0;
+    double totalLatencySum = 0.0;
+    uint64_t totalRxPackets = 0;
+    uint64_t totalTxPackets = 0;
+    uint32_t flowCount = 0;
 
     for (auto& iter : stats)
     {
@@ -586,15 +573,11 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         totalTxPackets += iter.second.txPackets;
     }
 
-    double overallAvgLatency    = (totalRxPackets > 0)
-                                  ? (totalLatencySum / totalRxPackets)
-                                  : 0.0;
-    double overallAvgThroughput = (flowCount > 0)
-                                  ? (totalThroughputSum / flowCount)
-                                  : 0.0;
-    double packetLossRate       = (totalTxPackets > 0)
-                                  ? (double)(totalTxPackets - totalRxPackets) / totalTxPackets * 100.0
-                                  : 0.0;
+    double overallAvgLatency = (totalRxPackets > 0) ? (totalLatencySum / totalRxPackets) : 0.0;
+    double overallAvgThroughput = (flowCount > 0) ? (totalThroughputSum / flowCount) : 0.0;
+    double packetLossRate = (totalTxPackets > 0)
+                                ? (double)(totalTxPackets - totalRxPackets) / totalTxPackets * 100.0
+                                : 0.0;
 
     // Per-UE Throughput Over Time
     {
