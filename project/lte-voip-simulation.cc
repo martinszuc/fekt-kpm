@@ -43,7 +43,7 @@ struct SimulationParameters
 
     // Path Loss model parameters (suburban-like)
     double distance0 = 70.0;
-    double distance1 = 300.0;
+    double distance1 = 100.0;
     double exponent0 = 1.5;
     double exponent1 = 2.0;
     double exponent2 = 3.0;
