@@ -1,8 +1,9 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /**
- * @file enhanced-lte-voip-simulation-fixed.cc
+ * @file enhanced-lte-voip-simulation-enhanced.cc
  * @brief Enhanced LTE + VoIP simulation in ns-3 LENA 3.39 with multiple eNodeBs and UEs,
- *        measuring throughput, latency, packet loss, and jitter.
+ *        measuring throughput, latency, packet loss, and jitter. Enhanced animation with
+ *        color-coded eNodeBs and UEs, and labels indicating connections.
  */
 
 #include "ns3/animation-interface.h"
@@ -35,22 +36,22 @@ struct SimulationParameters
 {
     uint16_t numEnb = 4;     // Number of eNodeBs
     uint16_t numUe = 5;      // Number of UEs
-    double simTime = 20.0;   // Simulation time (seconds)
+    double simTime = 30.0;   // Simulation time (seconds)
     double areaSize = 200.0; // Simulation area side length (square)
 
     bool enableNetAnim = true;  // If true, produce NetAnim XML
     double statsInterval = 1.0; // FlowMonitor stats interval (seconds)
 
     // Path Loss model parameters (suburban-like)
-    double distance0 = 70.0;
-    double distance1 = 100.0;
+    double distance0 = 20.0;
+    double distance1 = 50.0;
     double exponent0 = 1.5;
     double exponent1 = 2.0;
     double exponent2 = 3.0;
 };
 
 // ============================================================================
-// GLOBALS FOR TIME-SERIES DATA
+ // GLOBALS FOR TIME-SERIES DATA
 // ============================================================================
 static double g_currentTime = 0.0;
 
@@ -261,18 +262,18 @@ main(int argc, char* argv[])
                 NS_LOG_INFO("Flow " << it->first << " mapped to UE " << ueIndex
                                     << " (src=" << t.sourceAddress
                                     << ", dst=" << t.destinationAddress << ":" << destPort << ")");
+
+                // Initialize
+                g_previousRxBytes[it->first] = 0;
+                g_previousDelaySum[it->first] = Seconds(0);
+                g_previousJitterSum[it->first] = Seconds(0); // new
+                g_previousRxPackets[it->first] = 0;
             }
             else
             {
                 NS_LOG_WARN("Flow " << it->first
                                     << " has unexpected destination port: " << destPort);
             }
-
-            // Initialize
-            g_previousRxBytes[it->first] = 0;
-            g_previousDelaySum[it->first] = Seconds(0);
-            g_previousJitterSum[it->first] = Seconds(0); // new
-            g_previousRxPackets[it->first] = 0;
         }
     });
 
