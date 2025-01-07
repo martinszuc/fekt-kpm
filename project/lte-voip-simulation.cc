@@ -43,10 +43,6 @@ struct SimulationParameters
     double simTime = 30.0;   ///< Simulation time in seconds
     double areaSize = 200.0; ///< Size of the simulation area (square in meters)
 
-    // Animation and Monitoring
-    bool enableNetAnim = true;  ///< Enable NetAnim output
-    double statsInterval = 1.0; ///< Interval for statistics collection in seconds
-
     // Path Loss Model Parameters
     double distance0 = 20.0; ///< First distance threshold in meters
     double distance1 = 50.0; ///< Second distance threshold in meters
@@ -54,13 +50,10 @@ struct SimulationParameters
     double exponent1 = 2.0;  ///< Path loss exponent between distance0 and distance1
     double exponent2 = 3.0;  ///< Path loss exponent beyond distance1
 
-    // VoIP Codec Parameters
-    struct VoipCodec
-    {
-        std::string name;     ///< Codec name
-        double bitrate;       ///< Bitrate in kbps
-        uint32_t packetSize;  ///< Packet size in bytes
-    } codec;
+
+        // Animation and Monitoring
+    bool enableNetAnim = true;  ///< Enable NetAnim output
+    double statsInterval = 1.0; ///< Interval for statistics collection in seconds
 
     /**
      * @brief Initializes default VoIP codec parameters.
@@ -92,6 +85,14 @@ struct SimulationParameters
 //        codec.packetSize = 10;
 //        // frameInterval = 10.0;
     }
+
+    // VoIP Codec Parameters
+    struct VoipCodec
+    {
+        std::string name;     ///< Codec name
+        double bitrate;       ///< Bitrate in kbps
+        uint32_t packetSize;  ///< Packet size in bytes
+    } codec;
 };
 
 // Global Variables for Time-Series Data
