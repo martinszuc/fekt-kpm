@@ -1,9 +1,8 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /**
- * @file enhanced-lte-voip-simulation-enhanced.cc
- * @brief Enhanced LTE + VoIP simulation in ns-3 LENA 3.39 with multiple eNodeBs and UEs,
- *        measuring throughput, latency, packet loss, and jitter. Enhanced animation with
- *        color-coded eNodeBs and UEs, and labels indicating connections.
+ * @file lte-voip-simulation.cc
+ * @brief LTE + VoIP simulation in ns-3 LENA 3.39 with multiple eNodeBs and UEs,
+ *        measuring throughput, latency, packet loss, and jitter.
  *
  * @authors
  *   Martin Szuc <matoszuc@gmail.com>
@@ -30,7 +29,7 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("EnhancedLteVoipSimulationFixed");
+NS_LOG_COMPONENT_DEFINE("VoipLteSimulation");
 
 /**
  * @struct SimulationParameters
@@ -48,7 +47,7 @@ struct SimulationParameters
     bool enableNetAnim = true;  ///< Enable NetAnim output
     double statsInterval = 1.0; ///< Interval for statistics collection in seconds
 
-    // Path Loss Model Parameters (Suburban)
+    // Path Loss Model Parameters
     double distance0 = 20.0; ///< First distance threshold in meters
     double distance1 = 50.0; ///< Second distance threshold in meters
     double exponent0 = 1.5;  ///< Path loss exponent before distance0
@@ -75,25 +74,23 @@ struct SimulationParameters
         // frameInterval = 10.0; // ms
 
         // Uncomment below to use different codecs
-        /*
-        // G.722.2
-        codec.name = "G.722.2";
-        codec.bitrate = 25.84;
-        codec.packetSize = 60;
-        // frameInterval = 20.0;
-
-        // G.723.1
-        codec.name = "G.723.1";
-        codec.bitrate = 6.3;
-        codec.packetSize = 24;
-        // frameInterval = 30.0;
-
-        // G.729
-        codec.name = "G.729";
-        codec.bitrate = 8.0;
-        codec.packetSize = 10;
-        // frameInterval = 10.0;
-        */
+//        // G.722.2
+//        codec.name = "G.722.2";
+//        codec.bitrate = 25.84;
+//        codec.packetSize = 60;
+//        // frameInterval = 20.0;
+//
+//        // G.723.1
+//        codec.name = "G.723.1";
+//        codec.bitrate = 6.3;
+//        codec.packetSize = 24;
+//        // frameInterval = 30.0;
+//
+//        // G.729
+//        codec.name = "G.729";
+//        codec.bitrate = 8.0;
+//        codec.packetSize = 10;
+//        // frameInterval = 10.0;
     }
 };
 
@@ -130,7 +127,6 @@ void PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
                          FlowMonitorHelper& flowHelper,
                          const SimulationParameters& params);
 void LogAllNodePositions();
-void FixZCoordinate(Ptr<Node> node);
 void AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
                         Ptr<FlowMonitor> flowMonitor,
                         const SimulationParameters& params);
@@ -253,11 +249,6 @@ main(int argc, char* argv[])
             }
         }
         lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(closestEnb));
-
-        // Fix Z-coordinate for UEs
-        Vector pos = ueMobility->GetPosition();
-        pos.z = 1.5;
-        ueMobility->SetPosition(pos);
     }
 
     // Create Remote Host Link
@@ -366,7 +357,7 @@ main(int argc, char* argv[])
 
     // Clean Up
     Simulator::Destroy();
-    NS_LOG_INFO("Enhanced LTE simulation finished!");
+    NS_LOG_INFO("LTE simulation finished!");
     return 0;
 }
 
@@ -380,7 +371,7 @@ main(int argc, char* argv[])
 void
 ConfigureLogging()
 {
-    LogComponentEnable("EnhancedLteVoipSimulationFixed", LOG_LEVEL_INFO);
+    LogComponentEnable("VoipLteSimulation", LOG_LEVEL_INFO);
     // Uncomment below for verbose logs from specific applications:
     // LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);
     // LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
@@ -450,38 +441,6 @@ ConfigureUeMobility(NodeContainer& ueNodes, double areaSize)
                                 "PositionAllocator",
                                 PointerValue(positionAlloc));
     ueMobility.Install(ueNodes);
-
-    // Ensure UEs remain at a fixed Z-coordinate
-    for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
-    {
-        Ptr<Node> ue = ueNodes.Get(i);
-        Ptr<MobilityModel> mobility = ue->GetObject<MobilityModel>();
-        Ptr<RandomWaypointMobilityModel> rwm = DynamicCast<RandomWaypointMobilityModel>(mobility);
-
-        if (rwm)
-        {
-            // Fix Z-coordinate on every new position
-            rwm->TraceConnectWithoutContext("NewPosition", MakeBoundCallback(&FixZCoordinate, ue));
-        }
-
-        // Immediately fix Z-coordinate
-        Vector pos = mobility->GetPosition();
-        pos.z = 1.5;
-        mobility->SetPosition(pos);
-    }
-}
-
-/**
- * @brief Ensures that a node maintains a fixed Z-coordinate.
- * @param node Pointer to the node.
- */
-void
-FixZCoordinate(Ptr<Node> node)
-{
-    Ptr<MobilityModel> mobility = node->GetObject<MobilityModel>();
-    Vector pos = mobility->GetPosition();
-    pos.z = 1.5;
-    mobility->SetPosition(pos);
 }
 
 /**
