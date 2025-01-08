@@ -14,7 +14,7 @@
  * - Handover metrics tracked: handover starts, successes, failures.
  * - Aggregated metrics tracked: average throughput, latency.
  * - Outputs:
- *   - Gnuplot graphs for throughput, latency, and average throughput.
+ *   - Gnuplot graphs for throughput, latency, average throughput, RSRP, and RSRQ.
  *   - CSV export of metrics over time.
  *   - FlowMonitor XML output for detailed analysis.
  *   - NetAnim XML visualization.
@@ -178,28 +178,41 @@ void AnalyzeData(FlowMonitorHelper& flowHelper,
                  const std::vector<Ipv4Address>& ueAddresses);
 
 // Handover Callback Functions
+// Corrected to match trace source signatures
 void
-HandoverStartCallback(uint64_t imsi, uint16_t cellId, uint16_t targetCellId, uint16_t time)
+HandoverStartCallback(uint64_t imsi, uint16_t cellId, uint16_t targetCellId, unsigned short reason)
 {
+    Time currentTime = Simulator::Now();
     g_handoverStartCount++;
     handoverLogFile << "Handover Start: IMSI=" << imsi << ", from Cell=" << cellId
-                    << " to Cell=" << targetCellId << " at Time=" << time << "ms" << std::endl;
+                    << " to Cell=" << targetCellId << " Reason=" << reason
+                    << " at Time=" << currentTime.GetMilliSeconds() << "ms" << std::endl;
 }
 
 void
-HandoverSuccessCallback(uint64_t imsi, uint16_t cellId, uint16_t targetCellId, uint16_t time)
+HandoverSuccessCallback(uint64_t imsi,
+                        uint16_t cellId,
+                        uint16_t targetCellId,
+                        unsigned short reason)
 {
+    Time currentTime = Simulator::Now();
     g_handoverSuccessCount++;
     handoverLogFile << "Handover Success: IMSI=" << imsi << ", to Cell=" << targetCellId
-                    << " at Time=" << time << "ms" << std::endl;
+                    << " Reason=" << reason << " at Time=" << currentTime.GetMilliSeconds() << "ms"
+                    << std::endl;
 }
 
 void
-HandoverFailureCallback(uint64_t imsi, uint16_t cellId, uint16_t targetCellId, uint16_t time)
+HandoverFailureCallback(uint64_t imsi,
+                        uint16_t cellId,
+                        uint16_t targetCellId,
+                        unsigned short reason)
 {
+    Time currentTime = Simulator::Now();
     g_handoverFailureCount++;
     handoverLogFile << "Handover Failure: IMSI=" << imsi << ", from Cell=" << cellId
-                    << " to Cell=" << targetCellId << " at Time=" << time << "ms" << std::endl;
+                    << " to Cell=" << targetCellId << " Reason=" << reason
+                    << " at Time=" << currentTime.GetMilliSeconds() << "ms" << std::endl;
 }
 
 // ============================================================================
@@ -350,7 +363,7 @@ main(int argc, char* argv[])
     Ptr<FlowMonitor> flowMonitor = SetupFlowMonitor(flowHelper);
 
     // Map Flows to UEs and Initialize Statistics
-    Simulator::Schedule(Seconds(0.0), [&flowMonitor, &flowHelper, &params]() {
+    Simulator::Schedule(Seconds(0.0), [&flowMonitor, &flowHelper, &params, &ueDevs]() {
         auto initialStats = flowMonitor->GetFlowStats();
         Ptr<Ipv4FlowClassifier> classifier =
             DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
@@ -386,18 +399,29 @@ main(int argc, char* argv[])
         Ptr<LteEnbNetDevice> enbNetDevice = DynamicCast<LteEnbNetDevice>(enbDevs.Get(i));
         if (enbNetDevice)
         {
-            // Connect Handover Start
-            enbNetDevice->GetRrc()->TraceConnectWithoutContext(
-                "HandoverStart",
-                MakeCallback(&HandoverStartCallback));
-            // Connect Handover Success
-            enbNetDevice->GetRrc()->TraceConnectWithoutContext(
-                "HandoverSuccess",
-                MakeCallback(&HandoverSuccessCallback));
-            // Connect Handover Failure
-            enbNetDevice->GetRrc()->TraceConnectWithoutContext(
-                "HandoverFailure",
-                MakeCallback(&HandoverFailureCallback));
+            Ptr<LteEnbRrc> enbRrc = enbNetDevice->GetRrc();
+            if (enbRrc)
+            {
+                // Connect Handover Start
+                enbRrc->TraceConnectWithoutContext("HandoverStart",
+                                                   MakeCallback(&HandoverStartCallback));
+
+                // Connect Handover Success
+                enbRrc->TraceConnectWithoutContext("HandoverSuccess",
+                                                   MakeCallback(&HandoverSuccessCallback));
+
+                // Connect Handover Failure
+                enbRrc->TraceConnectWithoutContext("HandoverFailure",
+                                                   MakeCallback(&HandoverFailureCallback));
+            }
+            else
+            {
+                NS_LOG_WARN("eNodeB RRC not found for device " << i);
+            }
+        }
+        else
+        {
+            NS_LOG_WARN("eNodeB NetDevice not found for device " << i);
         }
     }
 
@@ -460,9 +484,6 @@ main(int argc, char* argv[])
 }
 
 // ============================================================================
-// FUNCTION DEFINITIONS
-// ============================================================================
-
 /**
  * @brief Configures the logging levels for various components.
  */
@@ -1049,7 +1070,7 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
             fileT << "'-' with linespoints title 'UE-" << ueIndex << "'";
-            if (ueIndex != static_cast<int>(params.numUe) - 1)
+            if (ueIndex != static_cast<uint32_t>(params.numUe) - 1)
                 fileT << ", ";
         }
         fileT << "\n";
