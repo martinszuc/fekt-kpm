@@ -25,6 +25,8 @@
 #include <fstream>
 #include <limits>
 #include <map>
+#include <random>
+#include <string>
 #include <vector>
 
 using namespace ns3;
@@ -44,16 +46,29 @@ struct SimulationParameters
     double areaSize = 200.0; ///< Size of the simulation area (square in meters)
 
     // Path Loss Model Parameters
-    double distance0 = 20.0; ///< First distance threshold in meters
-    double distance1 = 50.0; ///< Second distance threshold in meters
-    double exponent0 = 1.5;  ///< Path loss exponent before distance0
-    double exponent1 = 2.0;  ///< Path loss exponent between distance0 and distance1
-    double exponent2 = 3.0;  ///< Path loss exponent beyond distance1
+    double distance0 = 30.0;  ///< First distance threshold in meters
+    double distance1 = 100.0; ///< Second distance threshold in meters
+    double exponent0 = 1.7;   ///< Path loss exponent before distance0
+    double exponent1 = 2.5;   ///< Path loss exponent between distance0 and distance1
+    double exponent2 = 3.2;   ///< Path loss exponent beyond distance1
 
+    double static constexpr HANDOVER_HYSTERESIS = 3;
+    double static constexpr HANDOVER_TimeToTrigger = 120; // ms
 
-        // Animation and Monitoring
+    // Animation and Monitoring
     bool enableNetAnim = true;  ///< Enable NetAnim output
     double statsInterval = 1.0; ///< Interval for statistics collection in seconds
+
+    /**
+     * @brief Enum for different mobility modes.
+     */
+    enum MobilityMode
+    {
+        RANDOM_WAYPOINT = 0,                   ///< Random Waypoint Mobility Model
+        CONSTANT_UNDER_DISTANCE0 = 1,          ///< Constant Position within Distance0
+        CONSTANT_UNDER_DISTANCE1 = 2,          ///< Constant Position within Distance1
+        CONSTANT_ABOVE_DISTANCE1 = 3           ///< Constant Position above Distance1
+    } mobilityMode = CONSTANT_UNDER_DISTANCE1; ///< Selected Mobility Mode
 
     /**
      * @brief Initializes default VoIP codec parameters.
@@ -62,36 +77,36 @@ struct SimulationParameters
     {
         // Default Codec: G.711
         codec.name = "G.711";
-        codec.bitrate = 64.0;       // kbps
-        codec.packetSize = 80;      // bytes
+        codec.bitrate = 64.0;  // kbps
+        codec.packetSize = 80; // bytes
         // frameInterval = 10.0; // ms
 
         // Uncomment below to use different codecs
-//        // G.722.2
-//        codec.name = "G.722.2";
-//        codec.bitrate = 25.84;
-//        codec.packetSize = 60;
-//        // frameInterval = 20.0;
-//
-//        // G.723.1
-//        codec.name = "G.723.1";
-//        codec.bitrate = 6.3;
-//        codec.packetSize = 24;
-//        // frameInterval = 30.0;
-//
-//        // G.729
-//        codec.name = "G.729";
-//        codec.bitrate = 8.0;
-//        codec.packetSize = 10;
-//        // frameInterval = 10.0;
+        //        // G.722.2
+        //        codec.name = "G.722.2";
+        //        codec.bitrate = 25.84;
+        //        codec.packetSize = 60;
+        //        // frameInterval = 20.0;
+        //
+        //        // G.723.1
+        //        codec.name = "G.723.1";
+        //        codec.bitrate = 6.3;
+        //        codec.packetSize = 24;
+        //        // frameInterval = 30.0;
+        //
+        //        // G.729
+        //        codec.name = "G.729";
+        //        codec.bitrate = 8.0;
+        //        codec.packetSize = 10;
+        //        // frameInterval = 10.0;
     }
 
     // VoIP Codec Parameters
     struct VoipCodec
     {
-        std::string name;     ///< Codec name
-        double bitrate;       ///< Bitrate in kbps
-        uint32_t packetSize;  ///< Packet size in bytes
+        std::string name;    ///< Codec name
+        double bitrate;      ///< Bitrate in kbps
+        uint32_t packetSize; ///< Packet size in bytes
     } codec;
 };
 
@@ -113,7 +128,11 @@ std::map<FlowId, uint32_t> g_flowIdToUeIndex;
 // Function Prototypes
 void ConfigureLogging();
 void ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize);
-void ConfigureUeMobility(NodeContainer& ueNodes, double areaSize);
+void ConfigureUeMobility(NodeContainer& ueNodes,
+                         double areaSize,
+                         NodeContainer& enbNodes,
+                         SimulationParameters::MobilityMode mobilityMode,
+                         const SimulationParameters& params);
 Ipv4Address CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
                              NodeContainer& remoteHostContainer,
                              double areaSize);
@@ -128,19 +147,21 @@ void PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
                          FlowMonitorHelper& flowHelper,
                          const SimulationParameters& params);
 void LogAllNodePositions();
-void AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
-                        Ptr<FlowMonitor> flowMonitor,
-                        const SimulationParameters& params);
+void AnalyzeData(FlowMonitorHelper& flowHelper,
+                 Ptr<FlowMonitor> flowMonitor,
+                 const SimulationParameters& params,
+                 Ipv4Address remoteHostAddr,
+                 const std::vector<Ipv4Address>& ueAddresses);
 
 // ============================================================================
-// MAIN
-// ============================================================================
+/**
+ * @brief The main function that sets up and runs the simulation.
+ */
 int
 main(int argc, char* argv[])
 {
     // Initialize simulation parameters
     SimulationParameters params;
-    CommandLine cmd;
 
     // VoIP Codec Configuration
     // Codec Name | Bit rate (kbps) | Size of Packet (bytes) | Frame Interval (ms)
@@ -148,19 +169,6 @@ main(int argc, char* argv[])
     // G.722.2    | 25.84           | 60                      | 20
     // G.723.1    | 6.3             | 24                      | 30
     // G.729      | 8               | 10                      | 10
-
-    // Command-line overrides
-    cmd.AddValue("numEnb", "Number of eNodeBs", params.numEnb);
-    cmd.AddValue("numUe", "Number of UEs", params.numUe);
-    cmd.AddValue("simTime", "Simulation time (s)", params.simTime);
-    cmd.AddValue("areaSize", "Square area side [m]", params.areaSize);
-    cmd.AddValue("enableNetAnim", "Enable NetAnim output", params.enableNetAnim);
-    cmd.AddValue("distance0", "PathLoss Distance0 (m)", params.distance0);
-    cmd.AddValue("distance1", "PathLoss Distance1 (m)", params.distance1);
-    cmd.AddValue("exponent0", "PathLoss Exponent0", params.exponent0);
-    cmd.AddValue("exponent1", "PathLoss Exponent1", params.exponent1);
-    cmd.AddValue("exponent2", "PathLoss Exponent2", params.exponent2);
-    cmd.Parse(argc, argv);
 
     // Initialize data vectors for UEs
     g_ueThroughputSeries.resize(params.numUe, std::vector<double>());
@@ -195,12 +203,18 @@ main(int argc, char* argv[])
 
     // Handover Configuration
     lteHelper->SetHandoverAlgorithmType("ns3::A3RsrpHandoverAlgorithm");
-    lteHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(3.0));
-    lteHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(MilliSeconds(120)));
+    lteHelper->SetHandoverAlgorithmAttribute(
+        "Hysteresis",
+        DoubleValue(SimulationParameters::HANDOVER_HYSTERESIS));
+    lteHelper->SetHandoverAlgorithmAttribute(
+        "TimeToTrigger",
+        TimeValue(MilliSeconds(SimulationParameters::HANDOVER_TimeToTrigger)));
 
-    // Configure Mobility
+    // Configure Mobility for eNodeBs
     ConfigureEnbMobility(enbNodes, params.areaSize);
-    ConfigureUeMobility(ueNodes, params.areaSize);
+
+    // Configure Mobility for UEs based on selected mobility mode
+    ConfigureUeMobility(ueNodes, params.areaSize, enbNodes, params.mobilityMode, params);
 
     // Position Remote Host and PGW
     MobilityHelper remoteMobility;
@@ -226,6 +240,13 @@ main(int argc, char* argv[])
     // Assign IP Addresses to UEs
     epcHelper->AssignUeIpv4Address(ueDevs);
 
+    std::vector<Ipv4Address> ueAddresses;
+    Ipv4InterfaceContainer ueInterfaces = epcHelper->AssignUeIpv4Address(ueDevs);
+    for (uint32_t i = 0; i < ueInterfaces.GetN(); ++i)
+    {
+        ueAddresses.push_back(ueInterfaces.GetAddress(i));
+        NS_LOG_INFO("UE " << i << " IP Address: " << ueAddresses.back());
+    }
     // Attach UEs to the Nearest eNodeB
     std::vector<Ptr<MobilityModel>> enbMobilityModel(params.numEnb);
     for (uint32_t i = 0; i < enbNodes.GetN(); ++i)
@@ -354,7 +375,7 @@ main(int argc, char* argv[])
     Simulator::Run();
 
     // Final Analysis of Flow Monitor Data
-    AnalyzeFlowMonitor(flowHelper, flowMonitor, params);
+    AnalyzeData(flowHelper, flowMonitor, params, remoteHostAddr, ueAddresses);
 
     // Clean Up
     Simulator::Destroy();
@@ -373,19 +394,21 @@ void
 ConfigureLogging()
 {
     LogComponentEnable("VoipLteSimulation", LOG_LEVEL_INFO);
-    // Uncomment below for verbose logs from specific applications:
     // LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);
     // LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
 }
 
 /**
- * @brief Configures the mobility model for eNodeBs, placing them strategically based on the number of eNodeBs.
+ * @brief Configures the mobility model for eNodeBs, placing them strategically based on the number
+ * of eNodeBs.
  *        - If 4 eNodeBs: Position them at four corners of the simulation area.
- *        - If 2 eNodeBs: Align them centrally along the Y-axis, maintaining X-axis positions from the 4 eNodeB setup.
+ *        - If 2 eNodeBs: Align them centrally along the Y-axis, maintaining X-axis positions from
+ * the 4 eNodeB setup.
  * @param enbNodes Container of eNodeB nodes.
  * @param areaSize Size of the simulation area.
  */
-void ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize)
+void
+ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize)
 {
     MobilityHelper enbMobility;
     Ptr<ListPositionAllocator> posAlloc = CreateObject<ListPositionAllocator>();
@@ -393,20 +416,25 @@ void ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize)
     if (enbNodes.GetN() == 4)
     {
         // Four eNodeBs: Default positioning (corners)
-        posAlloc->Add(Vector(areaSize / 4, areaSize / 4, 30.0));        // Bottom-left
-        posAlloc->Add(Vector(areaSize / 4, 3 * areaSize / 4, 30.0));    // Top-left
-        posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 4, 30.0));    // Bottom-right
+        posAlloc->Add(Vector(areaSize / 4, areaSize / 4, 30.0));         // Bottom-left
+        posAlloc->Add(Vector(areaSize / 4, 3 * areaSize / 4, 30.0));     // Top-left
+        posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 4, 30.0));     // Bottom-right
         posAlloc->Add(Vector(3 * areaSize / 4, 3 * areaSize / 4, 30.0)); // Top-right
     }
     else if (enbNodes.GetN() == 2)
     {
         // Two eNodeBs: Centered along the Y-axis
-        posAlloc->Add(Vector(areaSize / 4, areaSize / 2, 30.0));        // Center-left
-        posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 2, 30.0));    // Center-right
+        posAlloc->Add(Vector(areaSize / 4, areaSize / 2, 30.0));     // Center-left
+        posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 2, 30.0)); // Center-right
     }
     else
     {
         NS_LOG_WARN("Unsupported number of eNodeBs: " << enbNodes.GetN());
+        // Place all eNodeBs at the center if unsupported number
+        for (uint32_t i = 0; i < enbNodes.GetN(); ++i)
+        {
+            posAlloc->Add(Vector(areaSize / 2, areaSize / 2, 30.0));
+        }
     }
 
     enbMobility.SetPositionAllocator(posAlloc);
@@ -414,34 +442,139 @@ void ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize)
     enbMobility.Install(enbNodes);
 }
 
-
 /**
- * @brief Configures the mobility model for UEs using Random Waypoint Mobility.
+ * @brief Configures the mobility model for UEs based on the selected mobility mode.
  * @param ueNodes Container of UE nodes.
  * @param areaSize Size of the simulation area.
+ * @param enbNodes Container of eNodeB nodes.
+ * @param mobilityMode Selected mobility mode.
+ * @param params Simulation parameters including path loss distances.
  */
 void
-ConfigureUeMobility(NodeContainer& ueNodes, double areaSize)
+ConfigureUeMobility(NodeContainer& ueNodes,
+                    double areaSize,
+                    NodeContainer& enbNodes,
+                    SimulationParameters::MobilityMode mobilityMode,
+                    const SimulationParameters& params)
 {
-    MobilityHelper ueMobility;
-    Ptr<RandomRectanglePositionAllocator> positionAlloc =
-        CreateObject<RandomRectanglePositionAllocator>();
+    switch (mobilityMode)
+    {
+    case SimulationParameters::RANDOM_WAYPOINT: {
+        MobilityHelper ueMobility;
+        Ptr<RandomRectanglePositionAllocator> positionAlloc =
+            CreateObject<RandomRectanglePositionAllocator>();
 
-    std::ostringstream xBound, yBound;
-    xBound << "ns3::UniformRandomVariable[Min=0.0|Max=" << areaSize << "]";
-    yBound << "ns3::UniformRandomVariable[Min=0.0|Max=" << areaSize << "]";
-    positionAlloc->SetAttribute("X", StringValue(xBound.str()));
-    positionAlloc->SetAttribute("Y", StringValue(yBound.str()));
+        std::ostringstream xBound, yBound;
+        xBound << "ns3::UniformRandomVariable[Min=0.0|Max=" << areaSize << "]";
+        yBound << "ns3::UniformRandomVariable[Min=0.0|Max=" << areaSize << "]";
+        positionAlloc->SetAttribute("X", StringValue(xBound.str()));
+        positionAlloc->SetAttribute("Y", StringValue(yBound.str()));
 
-    ueMobility.SetPositionAllocator(positionAlloc);
-    ueMobility.SetMobilityModel("ns3::RandomWaypointMobilityModel",
-                                "Speed",
-                                StringValue("ns3::UniformRandomVariable[Min=10.0|Max=30.0]"),
-                                "Pause",
-                                StringValue("ns3::ConstantRandomVariable[Constant=2.0]"),
-                                "PositionAllocator",
-                                PointerValue(positionAlloc));
-    ueMobility.Install(ueNodes);
+        ueMobility.SetPositionAllocator(positionAlloc);
+        ueMobility.SetMobilityModel("ns3::RandomWaypointMobilityModel",
+                                    "Speed",
+                                    StringValue("ns3::UniformRandomVariable[Min=10.0|Max=30.0]"),
+                                    "Pause",
+                                    StringValue("ns3::ConstantRandomVariable[Constant=2.0]"),
+                                    "PositionAllocator",
+                                    PointerValue(positionAlloc));
+        ueMobility.Install(ueNodes);
+        NS_LOG_INFO("Configured UEs with RandomWaypoint Mobility Model.");
+        break;
+    }
+    case SimulationParameters::CONSTANT_UNDER_DISTANCE0:
+    case SimulationParameters::CONSTANT_UNDER_DISTANCE1:
+    case SimulationParameters::CONSTANT_ABOVE_DISTANCE1: {
+        // Constant Position Mobility Model with placement based on distance
+        MobilityHelper ueMobility;
+        ueMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+        ueMobility.Install(ueNodes);
+
+        // Random number generators for position offsets
+        std::default_random_engine generator;
+        std::uniform_real_distribution<double> angleDist(0.0, 2 * M_PI);
+        std::uniform_real_distribution<double> distanceDist;
+
+        // Define distance range based on mobility mode
+        double minDist = 0.0;
+        double maxDist = 0.0;
+        if (mobilityMode == SimulationParameters::CONSTANT_UNDER_DISTANCE0)
+        {
+            minDist = 0.0;
+            maxDist = params.distance0;
+        }
+        else if (mobilityMode == SimulationParameters::CONSTANT_UNDER_DISTANCE1)
+        {
+            minDist = (params.distance1 / 2.0) - 10;
+            maxDist = (params.distance1 / 2.0) + 10;
+        }
+        else if (mobilityMode == SimulationParameters::CONSTANT_ABOVE_DISTANCE1)
+        {
+            minDist = params.distance1;
+            maxDist = params.areaSize; // Assuming maximum possible distance
+        }
+
+        for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
+        {
+            Ptr<Node> ue = ueNodes.Get(i);
+            Ptr<MobilityModel> ueMob = ue->GetObject<MobilityModel>();
+            if (!ueMob)
+            {
+                NS_LOG_WARN("UE " << i << " has no MobilityModel!");
+                continue;
+            }
+
+            // Find the closest eNodeB
+            double minDistance = std::numeric_limits<double>::max();
+            uint32_t closestEnb = 0;
+            Vector uePos(0, 0, 0);
+            for (uint32_t j = 0; j < enbNodes.GetN(); ++j)
+            {
+                Ptr<MobilityModel> enbMob = enbNodes.Get(j)->GetObject<MobilityModel>();
+                Vector enbPos = enbMob->GetPosition();
+                double dist = CalculateDistance(uePos, enbPos);
+                if (dist < minDistance)
+                {
+                    minDistance = dist;
+                    closestEnb = j;
+                }
+            }
+
+            Ptr<MobilityModel> enbMob = enbNodes.Get(closestEnb)->GetObject<MobilityModel>();
+            Vector enbPos = enbMob->GetPosition();
+
+            // Determine distance based on mobility mode
+            if (mobilityMode == SimulationParameters::CONSTANT_ABOVE_DISTANCE1)
+            {
+                distanceDist =
+                    std::uniform_real_distribution<double>(params.distance1, params.areaSize / 2.0);
+            }
+            else
+            {
+                distanceDist = std::uniform_real_distribution<double>(minDist, maxDist);
+            }
+
+            double distance = distanceDist(generator);
+            double angle = angleDist(generator);
+
+            // Calculate UE position relative to eNodeB
+            double ueX = enbPos.x + distance * cos(angle);
+            double ueY = enbPos.y + distance * sin(angle);
+
+            // Ensure UE is within the simulation area
+            ueX = std::max(0.0, std::min(ueX, params.areaSize));
+            ueY = std::max(0.0, std::min(ueY, params.areaSize));
+
+            ueMob->SetPosition(Vector(ueX, ueY, 0.0));
+        }
+
+        NS_LOG_INFO("Configured UEs with Constant Position Mobility Model.");
+        break;
+    }
+    default:
+        NS_LOG_ERROR("Misconfigured, stop simulation.");
+        return;
+    }
 }
 
 /**
@@ -578,7 +711,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
 
         // Identify the UE based on destination port
         uint16_t destPort = t.destinationPort;
-        if (destPort >= 5000 && destPort < 5000 + params.numUe)
+        if (destPort >= 5000 && destPort < (5000 + params.numUe))
         {
             uint32_t ueIndex = destPort - 5000;
 
@@ -634,7 +767,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
         aggregateThroughputKbps += ueThroughputKbps[i];
     }
 
-    double avgLatencyMs = (totalRxPackets > 0) ? (totalLatencySum / totalRxPackets) : 0.0;
+    double avgLatencyMs = (totalRxPackets > 0) ? (totalLatencySum / (double)totalRxPackets) : 0.0;
 
     // Store time-series data
     g_timeSeries.push_back(g_currentTime);
@@ -702,9 +835,11 @@ LogAllNodePositions()
  * @param params Simulation parameters.
  */
 void
-AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
-                   Ptr<FlowMonitor> flowMonitor,
-                   const SimulationParameters& params)
+AnalyzeData(FlowMonitorHelper& flowHelper,
+            Ptr<FlowMonitor> flowMonitor,
+            const SimulationParameters& params,
+            Ipv4Address remoteHostAddr,
+            const std::vector<Ipv4Address>& ueAddresses)
 {
     flowMonitor->CheckForLostPackets();
     Ptr<Ipv4FlowClassifier> classifier =
@@ -725,6 +860,20 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(iter.first);
         if (t.protocol != 17) // Only UDP (VoIP)
             continue;
+
+        // Check if the flow is from a UE to the Remote Host
+        bool isFromUe = false;
+        for (const auto& ueIp : ueAddresses)
+        {
+            if (t.sourceAddress == ueIp)
+            {
+                isFromUe = true;
+                break;
+            }
+        }
+
+        if (!isFromUe || t.destinationAddress != remoteHostAddr)
+            continue; // Skip flows not originating from UEs to Remote Host
 
         flowCount++;
         double duration =
@@ -823,7 +972,7 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         fileT.close();
 
         NS_LOG_INFO("UE Throughput Gnuplot script: ue-throughput-time-series.plt");
-        NS_LOG_INFO("Run `gnuplot ue-throughput-time-series.plt` to generate the PNG.");
+        NS_LOG_INFO("Run gnuplot ue-throughput-time-series.plt to generate the PNG.");
     }
 
     // Generate Gnuplot for Aggregate Latency
@@ -854,15 +1003,16 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         fileL << "set key left top\n";
         fileL << "plot '-' with linespoints title 'Avg Latency'\n";
 
-        for (size_t i = 0; i < g_timeSeries.size(); ++i)
+        for (size_t i = 0; i < g_timeSeries.size(); i++)
         {
-            fileL << g_timeSeries[i] << " " << g_avgLatencySeries[i] << "\n";
+            double lat = (i < g_avgLatencySeries.size()) ? g_avgLatencySeries[i] : 0.0;
+            fileL << g_timeSeries[i] << " " << lat << "\n";
         }
         fileL << "e\n";
         fileL.close();
 
         NS_LOG_INFO("Latency Gnuplot script: latency-time-series.plt");
-        NS_LOG_INFO("Run `gnuplot latency-time-series.plt` to generate the PNG.");
+        NS_LOG_INFO("Run gnuplot latency-time-series.plt to generate the PNG.");
     }
 
     // Final Metrics Logging
@@ -892,10 +1042,10 @@ AnalyzeFlowMonitor(FlowMonitorHelper& flowHelper,
         mdReport << "- **Packet Loss**   : " << packetLossRate << "%\n";
         mdReport << "- **Avg Jitter**    : " << overallAvgJitterMs << " ms\n\n";
         mdReport << "## Generated Plots\n";
-        mdReport << "- `ue-throughput-time-series.png`\n";
-        mdReport << "- `latency-time-series.png`\n\n";
+        mdReport << "- ue-throughput-time-series.png\n";
+        mdReport << "- latency-time-series.png\n\n";
         mdReport << "## FlowMonitor Results\n";
-        mdReport << "Stored in `flowmon.xml`.\n";
+        mdReport << "Stored in flowmon.xml.\n";
         mdReport.close();
 
         NS_LOG_INFO("Markdown report generated: simulation-report.md");
