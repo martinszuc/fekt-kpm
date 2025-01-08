@@ -59,11 +59,11 @@ struct SimulationParameters
     uint16_t numEnb = 2;     ///< Number of eNodeBs
     uint16_t numUe = 5;      ///< Number of UEs
     double simTime = 20.0;   ///< Simulation time in seconds
-    double areaSize = 200.0; ///< Size of the simulation area (square in meters)
+    double areaSize = 500.0; ///< Size of the simulation area (square in meters)
 
     // Path Loss Model Parameters
     double distance0 = 30.0;  ///< First distance threshold in meters
-    double distance1 = 100.0; ///< Second distance threshold in meters
+    double distance1 = 50.0; ///< Second distance threshold in meters
     double exponent0 = 1.7;   ///< Path loss exponent before distance0
     double exponent1 = 2.5;   ///< Path loss exponent between distance0 and distance1
     double exponent2 = 3.2;   ///< Path loss exponent beyond distance1
@@ -91,28 +91,27 @@ struct SimulationParameters
      */
     SimulationParameters()
     {
-        // Default Codec: G.711
-        codec.name = "G.711";
-        codec.bitrate = 64.0;  // kbps
-        codec.packetSize = 80; // bytes
-
         // Uncomment and configure other codecs as needed
-        /*
-        // G.722.2
-        codec.name = "G.722.2";
-        codec.bitrate = 25.84;
-        codec.packetSize = 60;
 
-        // G.723.1
-        codec.name = "G.723.1";
-        codec.bitrate = 6.3;
-        codec.packetSize = 24;
+         codec.name = "G.711";
+         codec.bitrate = 64.0;  // kbps
+         codec.packetSize = 80; // bytes
 
-        // G.729
-        codec.name = "G.729";
-        codec.bitrate = 8.0;
-        codec.packetSize = 10;
-        */
+        // // G.722.2
+        // codec.name = "G.722.2";
+        // codec.bitrate = 25.84;
+        // codec.packetSize = 60;
+
+        // // G.723.1
+        // codec.name = "G.723.1";
+        // codec.bitrate = 6.3;
+        // codec.packetSize = 24;
+
+        // // G.729
+//        codec.name = "G.729";
+//        codec.bitrate = 8.0;
+//        codec.packetSize = 10;
+
     }
 
     // VoIP Codec Parameters
@@ -178,7 +177,6 @@ void AnalyzeData(FlowMonitorHelper& flowHelper,
                  const std::vector<Ipv4Address>& ueAddresses);
 
 // Handover Callback Functions
-// Corrected to match trace source signatures
 void
 HandoverStartCallback(uint64_t imsi, uint16_t cellId, uint16_t targetCellId, unsigned short reason)
 {
@@ -263,9 +261,9 @@ main(int argc, char* argv[])
     lteHelper->SetPathlossModelAttribute("Exponent2", DoubleValue(params.exponent2));
 
     // LTE Scheduler Configuration
-    // lteHelper->SetSchedulerType("ns3::RrFfMacScheduler");
+    lteHelper->SetSchedulerType("ns3::RrFfMacScheduler");
     // lteHelper->SetSchedulerType("ns3::PfFfMacScheduler");
-    lteHelper->SetSchedulerType("ns3::TdBetFfMacScheduler");
+    // lteHelper->SetSchedulerType("ns3::TdBetFfMacScheduler");
 
     // Handover Configuration
     lteHelper->SetHandoverAlgorithmType("ns3::A3RsrpHandoverAlgorithm");
