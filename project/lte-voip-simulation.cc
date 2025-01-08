@@ -68,7 +68,7 @@ struct SimulationParameters
         CONSTANT_UNDER_DISTANCE0 = 1,          ///< Constant Position within Distance0
         CONSTANT_UNDER_DISTANCE1 = 2,          ///< Constant Position within Distance1
         CONSTANT_ABOVE_DISTANCE1 = 3           ///< Constant Position above Distance1
-    } mobilityMode = CONSTANT_UNDER_DISTANCE1; ///< Selected Mobility Mode
+    } mobilityMode = RANDOM_WAYPOINT; ///< Selected Mobility Mode
 
     /**
      * @brief Initializes default VoIP codec parameters.
@@ -117,6 +117,7 @@ std::vector<std::vector<double>> g_ueThroughputSeries;
 std::vector<std::vector<double>> g_uePacketLossSeries;
 std::vector<std::vector<double>> g_ueJitterSeries;
 std::vector<double> g_avgLatencySeries;
+std::vector<double> g_avgThroughputSeries;
 
 // Flow Statistics Tracking
 std::map<FlowId, uint64_t> g_previousRxBytes;
@@ -174,6 +175,7 @@ main(int argc, char* argv[])
     g_ueThroughputSeries.resize(params.numUe, std::vector<double>());
     g_uePacketLossSeries.resize(params.numUe, std::vector<double>());
     g_ueJitterSeries.resize(params.numUe, std::vector<double>());
+    g_avgThroughputSeries.resize(0);
 
     // Enable logging
     ConfigureLogging();
@@ -199,7 +201,9 @@ main(int argc, char* argv[])
     lteHelper->SetPathlossModelAttribute("Exponent2", DoubleValue(params.exponent2));
 
     // LTE Scheduler Configuration
-    lteHelper->SetSchedulerType("ns3::RrFfMacScheduler");
+    // lteHelper->SetSchedulerType("ns3::RrFfMacScheduler");
+    // lteHelper->SetSchedulerType("ns3::PfFfMacScheduler");
+    lteHelper->SetSchedulerType("ns3::TdBetFfMacScheduler");
 
     // Handover Configuration
     lteHelper->SetHandoverAlgorithmType("ns3::A3RsrpHandoverAlgorithm");
@@ -238,15 +242,14 @@ main(int argc, char* argv[])
     internet.Install(epcHelper->GetPgwNode());
 
     // Assign IP Addresses to UEs
-    epcHelper->AssignUeIpv4Address(ueDevs);
-
-    std::vector<Ipv4Address> ueAddresses;
     Ipv4InterfaceContainer ueInterfaces = epcHelper->AssignUeIpv4Address(ueDevs);
+    std::vector<Ipv4Address> ueAddresses;
     for (uint32_t i = 0; i < ueInterfaces.GetN(); ++i)
     {
         ueAddresses.push_back(ueInterfaces.GetAddress(i));
         NS_LOG_INFO("UE " << i << " IP Address: " << ueAddresses.back());
     }
+
     // Attach UEs to the Nearest eNodeB
     std::vector<Ptr<MobilityModel>> enbMobilityModel(params.numEnb);
     for (uint32_t i = 0; i < enbNodes.GetN(); ++i)
@@ -400,10 +403,10 @@ ConfigureLogging()
 
 /**
  * @brief Configures the mobility model for eNodeBs, placing them strategically based on the number
- * of eNodeBs.
+ *        of eNodeBs.
  *        - If 4 eNodeBs: Position them at four corners of the simulation area.
  *        - If 2 eNodeBs: Align them centrally along the Y-axis, maintaining X-axis positions from
- * the 4 eNodeB setup.
+ *          the 4 eNodeB setup.
  * @param enbNodes Container of eNodeB nodes.
  * @param areaSize Size of the simulation area.
  */
@@ -527,7 +530,7 @@ ConfigureUeMobility(NodeContainer& ueNodes,
             // Find the closest eNodeB
             double minDistance = std::numeric_limits<double>::max();
             uint32_t closestEnb = 0;
-            Vector uePos(0, 0, 0);
+            Vector uePos(0, 0, 0); // Assuming initial position is (0,0,0)
             for (uint32_t j = 0; j < enbNodes.GetN(); ++j)
             {
                 Ptr<MobilityModel> enbMob = enbNodes.Get(j)->GetObject<MobilityModel>();
@@ -573,7 +576,7 @@ ConfigureUeMobility(NodeContainer& ueNodes,
     }
     default:
         NS_LOG_ERROR("Misconfigured, stop simulation.");
-        return;
+        exit(1);
     }
 }
 
@@ -769,6 +772,10 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
 
     double avgLatencyMs = (totalRxPackets > 0) ? (totalLatencySum / (double)totalRxPackets) : 0.0;
 
+    // Compute average throughput across all UEs
+    double avgThroughputKbps = (params.numUe > 0) ? (aggregateThroughputKbps / params.numUe) : 0.0;
+    g_avgThroughputSeries.push_back(avgThroughputKbps); // Store average throughput
+
     // Store time-series data
     g_timeSeries.push_back(g_currentTime);
     g_avgLatencySeries.push_back(avgLatencyMs);
@@ -784,6 +791,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
     std::ostringstream oss;
     oss << "Time: " << g_currentTime << "s, "
         << "Aggregate Throughput: " << aggregateThroughputKbps << " Kbps, "
+        << "Average Throughput: " << avgThroughputKbps << " Kbps, "
         << "Avg Latency: " << avgLatencyMs << " ms";
     for (uint32_t i = 0; i < params.numUe; i++)
     {
@@ -833,6 +841,8 @@ LogAllNodePositions()
  * @param flowHelper FlowMonitorHelper instance.
  * @param flowMonitor FlowMonitor instance.
  * @param params Simulation parameters.
+ * @param remoteHostAddr IP address of the remote host.
+ * @param ueAddresses Vector of UE IP addresses.
  */
 void
 AnalyzeData(FlowMonitorHelper& flowHelper,
@@ -972,7 +982,7 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
         fileT.close();
 
         NS_LOG_INFO("UE Throughput Gnuplot script: ue-throughput-time-series.plt");
-        NS_LOG_INFO("Run gnuplot ue-throughput-time-series.plt to generate the PNG.");
+        NS_LOG_INFO("Run 'gnuplot ue-throughput-time-series.plt' to generate the PNG.");
     }
 
     // Generate Gnuplot for Aggregate Latency
@@ -1012,7 +1022,47 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
         fileL.close();
 
         NS_LOG_INFO("Latency Gnuplot script: latency-time-series.plt");
-        NS_LOG_INFO("Run gnuplot latency-time-series.plt to generate the PNG.");
+        NS_LOG_INFO("Run 'gnuplot latency-time-series.plt' to generate the PNG.");
+    }
+
+    // Generate Gnuplot for Average Throughput
+    Gnuplot plotAvgThroughput;
+    plotAvgThroughput.SetTitle("Average Throughput Over Time");
+    plotAvgThroughput.SetTerminal("png size 800,600");
+    plotAvgThroughput.SetOutputFilename("avg-throughput-time-series.png");
+    plotAvgThroughput.SetLegend("Time (s)", "Average Throughput (Kbps)");
+
+    Gnuplot2dDataset dsAvgThroughput;
+    dsAvgThroughput.SetTitle("Avg Throughput");
+    dsAvgThroughput.SetStyle(Gnuplot2dDataset::LINES_POINTS);
+
+    for (size_t i = 0; i < g_timeSeries.size(); ++i)
+    {
+        dsAvgThroughput.Add(g_timeSeries[i], g_avgThroughputSeries[i]);
+    }
+    plotAvgThroughput.AddDataset(dsAvgThroughput);
+
+    // Write Gnuplot Script for Average Throughput
+    {
+        std::ofstream fileAvg("avg-throughput-time-series.plt");
+        fileAvg << "set terminal png size 800,600\n";
+        fileAvg << "set output 'avg-throughput-time-series.png'\n";
+        fileAvg << "set title 'Average Throughput Over Time'\n";
+        fileAvg << "set xlabel 'Time (s)'\n";
+        fileAvg << "set ylabel 'Average Throughput (Kbps)'\n";
+        fileAvg << "set key left top\n";
+        fileAvg << "plot '-' with linespoints title 'Avg Throughput'\n";
+
+        for (size_t i = 0; i < g_timeSeries.size(); i++)
+        {
+            double avgThr = (i < g_avgThroughputSeries.size()) ? g_avgThroughputSeries[i] : 0.0;
+            fileAvg << g_timeSeries[i] << " " << avgThr << "\n";
+        }
+        fileAvg << "e\n";
+        fileAvg.close();
+
+        NS_LOG_INFO("Average Throughput Gnuplot script: avg-throughput-time-series.plt");
+        NS_LOG_INFO("Run 'gnuplot avg-throughput-time-series.plt' to generate the PNG.");
     }
 
     // Final Metrics Logging
@@ -1043,7 +1093,8 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
         mdReport << "- **Avg Jitter**    : " << overallAvgJitterMs << " ms\n\n";
         mdReport << "## Generated Plots\n";
         mdReport << "- ue-throughput-time-series.png\n";
-        mdReport << "- latency-time-series.png\n\n";
+        mdReport << "- latency-time-series.png\n";
+        mdReport << "- avg-throughput-time-series.png\n\n"; // Added average throughput plot
         mdReport << "## FlowMonitor Results\n";
         mdReport << "Stored in flowmon.xml.\n";
         mdReport.close();
@@ -1060,7 +1111,7 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
     }
 
     // Write CSV Header
-    csvFile << "Time(s)";
+    csvFile << "Time(s),Avg_Throughput(Kbps)";
     for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
     {
         csvFile << ",UE" << ueIndex << "_Throughput(Kbps)";
@@ -1080,21 +1131,29 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
     size_t numEntries = g_timeSeries.size();
     for (size_t i = 0; i < numEntries; ++i)
     {
-        csvFile << g_timeSeries[i];
+        csvFile << g_timeSeries[i] << ",";
+
+        double avgThr =
+            (i < g_avgThroughputSeries.size()) ? g_avgThroughputSeries[i] : 0.0;
+        csvFile << avgThr;
+
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
             double thr =
                 (i < g_ueThroughputSeries[ueIndex].size()) ? g_ueThroughputSeries[ueIndex][i] : 0.0;
             csvFile << "," << thr;
         }
+
         double lat = (i < g_avgLatencySeries.size()) ? g_avgLatencySeries[i] : 0.0;
         csvFile << "," << lat;
+
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
             double loss =
                 (i < g_uePacketLossSeries[ueIndex].size()) ? g_uePacketLossSeries[ueIndex][i] : 0.0;
             csvFile << "," << loss;
         }
+
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
             double jit =
