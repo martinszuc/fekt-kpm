@@ -4,6 +4,20 @@
  * @brief LTE + VoIP simulation in ns-3 LENA 3.39 with multiple eNodeBs and UEs,
  *        measuring throughput, latency, packet loss, and jitter.
  *
+ * Features:
+ * - LTE + VoIP simulation using ns-3 LTE module (LENA).
+ * - Multiple eNodeBs and UEs with configurable positions and mobility.
+ * - VoIP traffic generated using OnOff applications with configurable codecs.
+ * - Path loss modeled using ThreeLogDistancePropagationLossModel.
+ * - Handover simulated using A3-RSRP algorithm with hysteresis and Time-To-Trigger.
+ * - Per-UE metrics tracked: throughput, latency, packet loss, jitter.
+ * - Aggregated metrics tracked: average throughput, latency.
+ * - Outputs:
+ *   - Gnuplot graphs for throughput, latency, and average throughput.
+ *   - CSV export of metrics over time.
+ *   - FlowMonitor XML output for detailed analysis.
+ *   - NetAnim XML visualization.
+ *
  * @authors
  *   Martin Szuc <matoszuc@gmail.com>
  */
@@ -64,10 +78,10 @@ struct SimulationParameters
      */
     enum MobilityMode
     {
-        RANDOM_WAYPOINT = 0,                   ///< Random Waypoint Mobility Model
-        CONSTANT_UNDER_DISTANCE0 = 1,          ///< Constant Position within Distance0
-        CONSTANT_UNDER_DISTANCE1 = 2,          ///< Constant Position within Distance1
-        CONSTANT_ABOVE_DISTANCE1 = 3           ///< Constant Position above Distance1
+        RANDOM_WAYPOINT = 0,          ///< Random Waypoint Mobility Model
+        CONSTANT_UNDER_DISTANCE0 = 1, ///< Constant Position within Distance0
+        CONSTANT_UNDER_DISTANCE1 = 2, ///< Constant Position within Distance1
+        CONSTANT_ABOVE_DISTANCE1 = 3  ///< Constant Position above Distance1
     } mobilityMode = RANDOM_WAYPOINT; ///< Selected Mobility Mode
 
     /**
@@ -79,26 +93,21 @@ struct SimulationParameters
         codec.name = "G.711";
         codec.bitrate = 64.0;  // kbps
         codec.packetSize = 80; // bytes
-        // frameInterval = 10.0; // ms
 
-        // Uncomment below to use different codecs
         //        // G.722.2
         //        codec.name = "G.722.2";
         //        codec.bitrate = 25.84;
         //        codec.packetSize = 60;
-        //        // frameInterval = 20.0;
         //
         //        // G.723.1
         //        codec.name = "G.723.1";
         //        codec.bitrate = 6.3;
         //        codec.packetSize = 24;
-        //        // frameInterval = 30.0;
         //
         //        // G.729
         //        codec.name = "G.729";
         //        codec.bitrate = 8.0;
         //        codec.packetSize = 10;
-        //        // frameInterval = 10.0;
     }
 
     // VoIP Codec Parameters
@@ -110,14 +119,14 @@ struct SimulationParameters
     } codec;
 };
 
-// Global Variables for Time-Series Data
+// Global Variables for Time-Plot Data
 static double g_currentTime = 0.0;
-std::vector<double> g_timeSeries;
-std::vector<std::vector<double>> g_ueThroughputSeries;
-std::vector<std::vector<double>> g_uePacketLossSeries;
-std::vector<std::vector<double>> g_ueJitterSeries;
-std::vector<double> g_avgLatencySeries;
-std::vector<double> g_avgThroughputSeries;
+std::vector<double> g_timePlot;
+std::vector<std::vector<double>> g_ueThroughputPlot;
+std::vector<std::vector<double>> g_uePacketLossPlot;
+std::vector<std::vector<double>> g_ueJitterPlot;
+std::vector<double> g_avgLatencyPlot;
+std::vector<double> g_avgThroughputPlot;
 
 // Flow Statistics Tracking
 std::map<FlowId, uint64_t> g_previousRxBytes;
@@ -172,10 +181,10 @@ main(int argc, char* argv[])
     // G.729      | 8               | 10                      | 10
 
     // Initialize data vectors for UEs
-    g_ueThroughputSeries.resize(params.numUe, std::vector<double>());
-    g_uePacketLossSeries.resize(params.numUe, std::vector<double>());
-    g_ueJitterSeries.resize(params.numUe, std::vector<double>());
-    g_avgThroughputSeries.resize(0);
+    g_ueThroughputPlot.resize(params.numUe, std::vector<double>());
+    g_uePacketLossPlot.resize(params.numUe, std::vector<double>());
+    g_ueJitterPlot.resize(params.numUe, std::vector<double>());
+    g_avgThroughputPlot.resize(0);
 
     // Enable logging
     ConfigureLogging();
@@ -774,17 +783,17 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
 
     // Compute average throughput across all UEs
     double avgThroughputKbps = (params.numUe > 0) ? (aggregateThroughputKbps / params.numUe) : 0.0;
-    g_avgThroughputSeries.push_back(avgThroughputKbps); // Store average throughput
+    g_avgThroughputPlot.push_back(avgThroughputKbps); // Store average throughput
 
-    // Store time-series data
-    g_timeSeries.push_back(g_currentTime);
-    g_avgLatencySeries.push_back(avgLatencyMs);
+    // Store time-plot data
+    g_timePlot.push_back(g_currentTime);
+    g_avgLatencyPlot.push_back(avgLatencyMs);
 
     for (uint32_t i = 0; i < params.numUe; i++)
     {
-        g_ueThroughputSeries[i].push_back(ueThroughputKbps[i]);
-        g_uePacketLossSeries[i].push_back(uePacketLossRate[i]);
-        g_ueJitterSeries[i].push_back(ueJitterMs[i]);
+        g_ueThroughputPlot[i].push_back(ueThroughputKbps[i]);
+        g_uePacketLossPlot[i].push_back(uePacketLossRate[i]);
+        g_ueJitterPlot[i].push_back(ueJitterMs[i]);
     }
 
     // Log current statistics
@@ -932,7 +941,7 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
     Gnuplot plotThroughput;
     plotThroughput.SetTitle("Per-UE Throughput Over Time");
     plotThroughput.SetTerminal("png size 800,600");
-    plotThroughput.SetOutputFilename("ue-throughput-time-series.png");
+    plotThroughput.SetOutputFilename("ue-throughput-time-plot.png");
     plotThroughput.SetLegend("Time (s)", "Throughput (Kbps)");
 
     for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
@@ -941,19 +950,19 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
         dsT.SetTitle("UE-" + std::to_string(ueIndex));
         dsT.SetStyle(Gnuplot2dDataset::LINES_POINTS);
 
-        size_t steps = std::min(g_timeSeries.size(), g_ueThroughputSeries[ueIndex].size());
+        size_t steps = std::min(g_timePlot.size(), g_ueThroughputPlot[ueIndex].size());
         for (size_t i = 0; i < steps; i++)
         {
-            dsT.Add(g_timeSeries[i], g_ueThroughputSeries[ueIndex][i]);
+            dsT.Add(g_timePlot[i], g_ueThroughputPlot[ueIndex][i]);
         }
         plotThroughput.AddDataset(dsT);
     }
 
     // Write Gnuplot Script for Throughput
     {
-        std::ofstream fileT("ue-throughput-time-series.plt");
+        std::ofstream fileT("ue-throughput-time-plot.plt");
         fileT << "set terminal png size 800,600\n";
-        fileT << "set output 'ue-throughput-time-series.png'\n";
+        fileT << "set output 'ue-throughput-time-plot.png'\n";
         fileT << "set title 'Per-UE Throughput Over Time'\n";
         fileT << "set xlabel 'Time (s)'\n";
         fileT << "set ylabel 'Throughput (Kbps)'\n";
@@ -970,99 +979,95 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
         // Write data for each UE
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
-            for (size_t i = 0; i < g_timeSeries.size(); i++)
+            for (size_t i = 0; i < g_timePlot.size(); i++)
             {
-                double thr = (i < g_ueThroughputSeries[ueIndex].size())
-                                 ? g_ueThroughputSeries[ueIndex][i]
-                                 : 0.0;
-                fileT << g_timeSeries[i] << " " << thr << "\n";
+                double thr =
+                    (i < g_ueThroughputPlot[ueIndex].size()) ? g_ueThroughputPlot[ueIndex][i] : 0.0;
+                fileT << g_timePlot[i] << " " << thr << "\n";
             }
             fileT << "e\n";
         }
         fileT.close();
 
-        NS_LOG_INFO("UE Throughput Gnuplot script: ue-throughput-time-series.plt");
-        NS_LOG_INFO("Run 'gnuplot ue-throughput-time-series.plt' to generate the PNG.");
+        NS_LOG_INFO("UE Throughput Gnuplot script: ue-throughput-time-plot.plt");
     }
 
     // Generate Gnuplot for Aggregate Latency
     Gnuplot plotLatency;
     plotLatency.SetTitle("Aggregate Latency Over Time");
     plotLatency.SetTerminal("png size 800,600");
-    plotLatency.SetOutputFilename("latency-time-series.png");
+    plotLatency.SetOutputFilename("latency-time-plot.png");
     plotLatency.SetLegend("Time (s)", "Latency (ms)");
 
     Gnuplot2dDataset dsL;
     dsL.SetTitle("Avg Latency (all flows)");
     dsL.SetStyle(Gnuplot2dDataset::LINES_POINTS);
 
-    for (size_t i = 0; i < g_timeSeries.size(); ++i)
+    for (size_t i = 0; i < g_timePlot.size(); ++i)
     {
-        dsL.Add(g_timeSeries[i], g_avgLatencySeries[i]);
+        dsL.Add(g_timePlot[i], g_avgLatencyPlot[i]);
     }
     plotLatency.AddDataset(dsL);
 
     // Write Gnuplot Script for Latency
     {
-        std::ofstream fileL("latency-time-series.plt");
+        std::ofstream fileL("latency-time-plot.plt");
         fileL << "set terminal png size 800,600\n";
-        fileL << "set output 'latency-time-series.png'\n";
+        fileL << "set output 'latency-time-plot.png'\n";
         fileL << "set title 'Aggregate Latency Over Time'\n";
         fileL << "set xlabel 'Time (s)'\n";
         fileL << "set ylabel 'Latency (ms)'\n";
         fileL << "set key left top\n";
         fileL << "plot '-' with linespoints title 'Avg Latency'\n";
 
-        for (size_t i = 0; i < g_timeSeries.size(); i++)
+        for (size_t i = 0; i < g_timePlot.size(); i++)
         {
-            double lat = (i < g_avgLatencySeries.size()) ? g_avgLatencySeries[i] : 0.0;
-            fileL << g_timeSeries[i] << " " << lat << "\n";
+            double lat = (i < g_avgLatencyPlot.size()) ? g_avgLatencyPlot[i] : 0.0;
+            fileL << g_timePlot[i] << " " << lat << "\n";
         }
         fileL << "e\n";
         fileL.close();
 
-        NS_LOG_INFO("Latency Gnuplot script: latency-time-series.plt");
-        NS_LOG_INFO("Run 'gnuplot latency-time-series.plt' to generate the PNG.");
+        NS_LOG_INFO("Latency Gnuplot script: latency-time-plot.plt");
     }
 
     // Generate Gnuplot for Average Throughput
     Gnuplot plotAvgThroughput;
     plotAvgThroughput.SetTitle("Average Throughput Over Time");
     plotAvgThroughput.SetTerminal("png size 800,600");
-    plotAvgThroughput.SetOutputFilename("avg-throughput-time-series.png");
+    plotAvgThroughput.SetOutputFilename("avg-throughput-time-plot.png");
     plotAvgThroughput.SetLegend("Time (s)", "Average Throughput (Kbps)");
 
     Gnuplot2dDataset dsAvgThroughput;
     dsAvgThroughput.SetTitle("Avg Throughput");
     dsAvgThroughput.SetStyle(Gnuplot2dDataset::LINES_POINTS);
 
-    for (size_t i = 0; i < g_timeSeries.size(); ++i)
+    for (size_t i = 0; i < g_timePlot.size(); ++i)
     {
-        dsAvgThroughput.Add(g_timeSeries[i], g_avgThroughputSeries[i]);
+        dsAvgThroughput.Add(g_timePlot[i], g_avgThroughputPlot[i]);
     }
     plotAvgThroughput.AddDataset(dsAvgThroughput);
 
     // Write Gnuplot Script for Average Throughput
     {
-        std::ofstream fileAvg("avg-throughput-time-series.plt");
+        std::ofstream fileAvg("avg-throughput-time-plot.plt");
         fileAvg << "set terminal png size 800,600\n";
-        fileAvg << "set output 'avg-throughput-time-series.png'\n";
+        fileAvg << "set output 'avg-throughput-time-plot.png'\n";
         fileAvg << "set title 'Average Throughput Over Time'\n";
         fileAvg << "set xlabel 'Time (s)'\n";
         fileAvg << "set ylabel 'Average Throughput (Kbps)'\n";
         fileAvg << "set key left top\n";
         fileAvg << "plot '-' with linespoints title 'Avg Throughput'\n";
 
-        for (size_t i = 0; i < g_timeSeries.size(); i++)
+        for (size_t i = 0; i < g_timePlot.size(); i++)
         {
-            double avgThr = (i < g_avgThroughputSeries.size()) ? g_avgThroughputSeries[i] : 0.0;
-            fileAvg << g_timeSeries[i] << " " << avgThr << "\n";
+            double avgThr = (i < g_avgThroughputPlot.size()) ? g_avgThroughputPlot[i] : 0.0;
+            fileAvg << g_timePlot[i] << " " << avgThr << "\n";
         }
         fileAvg << "e\n";
         fileAvg.close();
 
-        NS_LOG_INFO("Average Throughput Gnuplot script: avg-throughput-time-series.plt");
-        NS_LOG_INFO("Run 'gnuplot avg-throughput-time-series.plt' to generate the PNG.");
+        NS_LOG_INFO("Average Throughput Gnuplot script: avg-throughput-time-plot.plt");
     }
 
     // Final Metrics Logging
@@ -1076,33 +1081,7 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
     flowMonitor->SerializeToXmlFile("flowmon.xml", true, true);
     NS_LOG_INFO("FlowMonitor results stored in flowmon.xml.");
 
-    // Generate Markdown Report
-    std::ofstream mdReport("simulation-report.md");
-    if (!mdReport.is_open())
-    {
-        NS_LOG_ERROR("Failed to open simulation-report.md for writing.");
-    }
-    else
-    {
-        mdReport << "# Simulation Report\n\n";
-        mdReport << "**Simulation Time**: " << params.simTime << " s\n\n";
-        mdReport << "## Final Metrics\n";
-        mdReport << "- **Avg Throughput**: " << overallAvgThroughput << " Kbps\n";
-        mdReport << "- **Avg Latency**   : " << overallAvgLatencyMs << " ms\n";
-        mdReport << "- **Packet Loss**   : " << packetLossRate << "%\n";
-        mdReport << "- **Avg Jitter**    : " << overallAvgJitterMs << " ms\n\n";
-        mdReport << "## Generated Plots\n";
-        mdReport << "- ue-throughput-time-series.png\n";
-        mdReport << "- latency-time-series.png\n";
-        mdReport << "- avg-throughput-time-series.png\n\n"; // Added average throughput plot
-        mdReport << "## FlowMonitor Results\n";
-        mdReport << "Stored in flowmon.xml.\n";
-        mdReport.close();
-
-        NS_LOG_INFO("Markdown report generated: simulation-report.md");
-    }
-
-    // Export Time-Series Data to CSV
+    // Export Time-Plot Data to CSV
     std::ofstream csvFile("simulation_metrics.csv");
     if (!csvFile.is_open())
     {
@@ -1128,36 +1107,34 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
     csvFile << "\n";
 
     // Write CSV Data Rows
-    size_t numEntries = g_timeSeries.size();
+    size_t numEntries = g_timePlot.size();
     for (size_t i = 0; i < numEntries; ++i)
     {
-        csvFile << g_timeSeries[i] << ",";
+        csvFile << g_timePlot[i] << ",";
 
-        double avgThr =
-            (i < g_avgThroughputSeries.size()) ? g_avgThroughputSeries[i] : 0.0;
+        double avgThr = (i < g_avgThroughputPlot.size()) ? g_avgThroughputPlot[i] : 0.0;
         csvFile << avgThr;
 
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
             double thr =
-                (i < g_ueThroughputSeries[ueIndex].size()) ? g_ueThroughputSeries[ueIndex][i] : 0.0;
+                (i < g_ueThroughputPlot[ueIndex].size()) ? g_ueThroughputPlot[ueIndex][i] : 0.0;
             csvFile << "," << thr;
         }
 
-        double lat = (i < g_avgLatencySeries.size()) ? g_avgLatencySeries[i] : 0.0;
+        double lat = (i < g_avgLatencyPlot.size()) ? g_avgLatencyPlot[i] : 0.0;
         csvFile << "," << lat;
 
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
             double loss =
-                (i < g_uePacketLossSeries[ueIndex].size()) ? g_uePacketLossSeries[ueIndex][i] : 0.0;
+                (i < g_uePacketLossPlot[ueIndex].size()) ? g_uePacketLossPlot[ueIndex][i] : 0.0;
             csvFile << "," << loss;
         }
 
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
-            double jit =
-                (i < g_ueJitterSeries[ueIndex].size()) ? g_ueJitterSeries[ueIndex][i] : 0.0;
+            double jit = (i < g_ueJitterPlot[ueIndex].size()) ? g_ueJitterPlot[ueIndex][i] : 0.0;
             csvFile << "," << jit;
         }
         csvFile << "\n";
