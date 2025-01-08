@@ -2,7 +2,7 @@
 /**
  * @file lte-voip-simulation.cc
  * @brief LTE + VoIP simulation in ns-3 LENA 3.39 with multiple eNodeBs and UEs,
- *        measuring throughput, latency, packet loss, and jitter.
+ *        measuring throughput, latency, packet loss, jitter, and handover events.
  *
  * Features:
  * - LTE + VoIP simulation using ns-3 LTE module (LENA).
@@ -11,6 +11,7 @@
  * - Path loss modeled using ThreeLogDistancePropagationLossModel.
  * - Handover simulated using A3-RSRP algorithm with hysteresis and Time-To-Trigger.
  * - Per-UE metrics tracked: throughput, latency, packet loss, jitter.
+ * - Handover metrics tracked: handover starts, successes, failures.
  * - Aggregated metrics tracked: average throughput, latency.
  * - Outputs:
  *   - Gnuplot graphs for throughput, latency, and average throughput.
@@ -36,6 +37,7 @@
 #include "ns3/packet-sink-helper.h"
 #include "ns3/point-to-point-module.h"
 
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <map>
@@ -56,7 +58,7 @@ struct SimulationParameters
     // Network Configuration
     uint16_t numEnb = 2;     ///< Number of eNodeBs
     uint16_t numUe = 5;      ///< Number of UEs
-    double simTime = 30.0;   ///< Simulation time in seconds
+    double simTime = 20.0;   ///< Simulation time in seconds
     double areaSize = 200.0; ///< Size of the simulation area (square in meters)
 
     // Path Loss Model Parameters
@@ -94,20 +96,23 @@ struct SimulationParameters
         codec.bitrate = 64.0;  // kbps
         codec.packetSize = 80; // bytes
 
-        //        // G.722.2
-        //        codec.name = "G.722.2";
-        //        codec.bitrate = 25.84;
-        //        codec.packetSize = 60;
-        //
-        //        // G.723.1
-        //        codec.name = "G.723.1";
-        //        codec.bitrate = 6.3;
-        //        codec.packetSize = 24;
-        //
-        //        // G.729
-        //        codec.name = "G.729";
-        //        codec.bitrate = 8.0;
-        //        codec.packetSize = 10;
+        // Uncomment and configure other codecs as needed
+        /*
+        // G.722.2
+        codec.name = "G.722.2";
+        codec.bitrate = 25.84;
+        codec.packetSize = 60;
+
+        // G.723.1
+        codec.name = "G.723.1";
+        codec.bitrate = 6.3;
+        codec.packetSize = 24;
+
+        // G.729
+        codec.name = "G.729";
+        codec.bitrate = 8.0;
+        codec.packetSize = 10;
+        */
     }
 
     // VoIP Codec Parameters
@@ -134,6 +139,15 @@ std::map<FlowId, Time> g_previousDelaySum;
 std::map<FlowId, Time> g_previousJitterSum;
 std::map<FlowId, uint64_t> g_previousRxPackets;
 std::map<FlowId, uint32_t> g_flowIdToUeIndex;
+
+// Handover Logging Variables
+std::ofstream handoverLogFile;
+uint32_t g_handoverStartCount = 0;
+uint32_t g_handoverSuccessCount = 0;
+uint32_t g_handoverFailureCount = 0;
+std::vector<uint32_t> g_handoverStartPlot;
+std::vector<uint32_t> g_handoverSuccessPlot;
+std::vector<uint32_t> g_handoverFailurePlot;
 
 // Function Prototypes
 void ConfigureLogging();
@@ -163,6 +177,31 @@ void AnalyzeData(FlowMonitorHelper& flowHelper,
                  Ipv4Address remoteHostAddr,
                  const std::vector<Ipv4Address>& ueAddresses);
 
+// Handover Callback Functions
+void
+HandoverStartCallback(uint64_t imsi, uint16_t cellId, uint16_t targetCellId, uint16_t time)
+{
+    g_handoverStartCount++;
+    handoverLogFile << "Handover Start: IMSI=" << imsi << ", from Cell=" << cellId
+                    << " to Cell=" << targetCellId << " at Time=" << time << "ms" << std::endl;
+}
+
+void
+HandoverSuccessCallback(uint64_t imsi, uint16_t cellId, uint16_t targetCellId, uint16_t time)
+{
+    g_handoverSuccessCount++;
+    handoverLogFile << "Handover Success: IMSI=" << imsi << ", to Cell=" << targetCellId
+                    << " at Time=" << time << "ms" << std::endl;
+}
+
+void
+HandoverFailureCallback(uint64_t imsi, uint16_t cellId, uint16_t targetCellId, uint16_t time)
+{
+    g_handoverFailureCount++;
+    handoverLogFile << "Handover Failure: IMSI=" << imsi << ", from Cell=" << cellId
+                    << " to Cell=" << targetCellId << " at Time=" << time << "ms" << std::endl;
+}
+
 // ============================================================================
 /**
  * @brief The main function that sets up and runs the simulation.
@@ -173,13 +212,6 @@ main(int argc, char* argv[])
     // Initialize simulation parameters
     SimulationParameters params;
 
-    // VoIP Codec Configuration
-    // Codec Name | Bit rate (kbps) | Size of Packet (bytes) | Frame Interval (ms)
-    // G.711      | 64              | 80                      | 10
-    // G.722.2    | 25.84           | 60                      | 20
-    // G.723.1    | 6.3             | 24                      | 30
-    // G.729      | 8               | 10                      | 10
-
     // Initialize data vectors for UEs
     g_ueThroughputPlot.resize(params.numUe, std::vector<double>());
     g_uePacketLossPlot.resize(params.numUe, std::vector<double>());
@@ -188,6 +220,14 @@ main(int argc, char* argv[])
 
     // Enable logging
     ConfigureLogging();
+
+    // Open the handover log file
+    handoverLogFile.open("handover_events.log", std::ios::out | std::ios::trunc);
+    if (!handoverLogFile.is_open())
+    {
+        NS_LOG_ERROR("Failed to open handover_events.log for writing.");
+        return 1;
+    }
 
     // Create nodes
     NodeContainer enbNodes, ueNodes, remoteHostContainer;
@@ -340,6 +380,27 @@ main(int argc, char* argv[])
         }
     });
 
+    // Connect Handover Trace Sources to Callbacks
+    for (uint32_t i = 0; i < enbDevs.GetN(); ++i)
+    {
+        Ptr<LteEnbNetDevice> enbNetDevice = DynamicCast<LteEnbNetDevice>(enbDevs.Get(i));
+        if (enbNetDevice)
+        {
+            // Connect Handover Start
+            enbNetDevice->GetRrc()->TraceConnectWithoutContext(
+                "HandoverStart",
+                MakeCallback(&HandoverStartCallback));
+            // Connect Handover Success
+            enbNetDevice->GetRrc()->TraceConnectWithoutContext(
+                "HandoverSuccess",
+                MakeCallback(&HandoverSuccessCallback));
+            // Connect Handover Failure
+            enbNetDevice->GetRrc()->TraceConnectWithoutContext(
+                "HandoverFailure",
+                MakeCallback(&HandoverFailureCallback));
+        }
+    }
+
     // Initialize NetAnim
     AnimationInterface* anim = nullptr;
     if (params.enableNetAnim)
@@ -386,6 +447,9 @@ main(int argc, char* argv[])
     Simulator::Stop(Seconds(params.simTime));
     Simulator::Run();
 
+    // Finalize logging
+    handoverLogFile.close();
+
     // Final Analysis of Flow Monitor Data
     AnalyzeData(flowHelper, flowMonitor, params, remoteHostAddr, ueAddresses);
 
@@ -406,6 +470,9 @@ void
 ConfigureLogging()
 {
     LogComponentEnable("VoipLteSimulation", LOG_LEVEL_INFO);
+    LogComponentEnable("LteEnbRrc", LOG_LEVEL_INFO);
+    LogComponentEnable("LteUeRrc", LOG_LEVEL_INFO);
+    // Uncomment to enable more detailed logging
     // LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);
     // LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
 }
@@ -523,7 +590,7 @@ ConfigureUeMobility(NodeContainer& ueNodes,
         else if (mobilityMode == SimulationParameters::CONSTANT_ABOVE_DISTANCE1)
         {
             minDist = params.distance1;
-            maxDist = params.areaSize; // Assuming maximum possible distance
+            maxDist = params.areaSize / 2.0; // Assuming maximum possible distance
         }
 
         for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
@@ -539,7 +606,8 @@ ConfigureUeMobility(NodeContainer& ueNodes,
             // Find the closest eNodeB
             double minDistance = std::numeric_limits<double>::max();
             uint32_t closestEnb = 0;
-            Vector uePos(0, 0, 0); // Assuming initial position is (0,0,0)
+            Vector uePos = ueMob->GetPosition();
+
             for (uint32_t j = 0; j < enbNodes.GetN(); ++j)
             {
                 Ptr<MobilityModel> enbMob = enbNodes.Get(j)->GetObject<MobilityModel>();
@@ -703,6 +771,16 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
     auto stats = flowMonitor->GetFlowStats();
     Ptr<Ipv4FlowClassifier> classifier =
         DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+
+    // Log handover counts
+    g_handoverStartPlot.push_back(g_handoverStartCount);
+    g_handoverSuccessPlot.push_back(g_handoverSuccessCount);
+    g_handoverFailurePlot.push_back(g_handoverFailureCount);
+
+    // Reset counters for the next interval
+    g_handoverStartCount = 0;
+    g_handoverSuccessCount = 0;
+    g_handoverFailureCount = 0;
 
     // Initialize per-UE metrics
     std::vector<double> ueThroughputKbps(params.numUe, 0.0);
@@ -971,7 +1049,7 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
             fileT << "'-' with linespoints title 'UE-" << ueIndex << "'";
-            if (ueIndex != params.numUe - 1)
+            if (ueIndex != static_cast<int>(params.numUe) - 1)
                 fileT << ", ";
         }
         fileT << "\n";
@@ -1104,6 +1182,9 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
     {
         csvFile << ",UE" << ueIndex << "_Jitter(ms)";
     }
+
+    // Add Handover Metrics to Header
+    csvFile << ",Handover_Start_Count,Handover_Success_Count,Handover_Failure_Count";
     csvFile << "\n";
 
     // Write CSV Data Rows
@@ -1137,6 +1218,13 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
             double jit = (i < g_ueJitterPlot[ueIndex].size()) ? g_ueJitterPlot[ueIndex][i] : 0.0;
             csvFile << "," << jit;
         }
+
+        // Add Handover Counts
+        uint32_t hs = (i < g_handoverStartPlot.size()) ? g_handoverStartPlot[i] : 0;
+        uint32_t hsucc = (i < g_handoverSuccessPlot.size()) ? g_handoverSuccessPlot[i] : 0;
+        uint32_t hf = (i < g_handoverFailurePlot.size()) ? g_handoverFailurePlot[i] : 0;
+        csvFile << "," << hs << "," << hsucc << "," << hf;
+
         csvFile << "\n";
     }
 
