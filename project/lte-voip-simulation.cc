@@ -59,7 +59,7 @@ struct SimulationParameters
     uint16_t numEnb = 2;     ///< Number of eNodeBs
     uint16_t numUe = 5;      ///< Number of UEs
     double simTime = 20.0;   ///< Simulation time in seconds
-    double areaSize = 500.0; ///< Size of the simulation area (square in meters)
+    double areaSize = 200.0; ///< Size of the simulation area (square in meters)
 
     // Path Loss Model Parameters
     double distance0 = 30.0;  ///< First distance threshold in meters
@@ -73,7 +73,7 @@ struct SimulationParameters
 
     // Animation and Monitoring
     bool enableNetAnim = true;  ///< Enable NetAnim output
-    double statsInterval = 1.0; ///< Interval for statistics collection in seconds
+    double statsInterval = 0.1; ///< Interval for statistics collection in seconds
 
     /**
      * @brief Enum for different mobility modes.
@@ -108,10 +108,9 @@ struct SimulationParameters
         // codec.packetSize = 24;
 
         // // G.729
-//        codec.name = "G.729";
-//        codec.bitrate = 8.0;
-//        codec.packetSize = 10;
-
+        // codec.name = "G.729";
+        // codec.bitrate = 8.0;
+        // codec.packetSize = 10;
     }
 
     // VoIP Codec Parameters
@@ -222,6 +221,10 @@ main(int argc, char* argv[])
 {
     // Initialize simulation parameters
     SimulationParameters params;
+
+    // Optionally, parse command-line arguments to override defaults
+    CommandLine cmd;
+    cmd.Parse(argc, argv);
 
     // Initialize data vectors for UEs
     g_ueThroughputPlot.resize(params.numUe, std::vector<double>());
@@ -334,6 +337,7 @@ main(int argc, char* argv[])
             }
         }
         lteHelper->Attach(ueDevs.Get(i), enbDevs.Get(closestEnb));
+        NS_LOG_INFO("UE " << i << " attached to eNodeB " << closestEnb);
     }
 
     // Create Remote Host Link
@@ -665,6 +669,8 @@ ConfigureUeMobility(NodeContainer& ueNodes,
             ueY = std::max(0.0, std::min(ueY, params.areaSize));
 
             ueMob->SetPosition(Vector(ueX, ueY, 0.0));
+
+            NS_LOG_INFO("UE " << i << " positioned at (" << ueX << ", " << ueY << ", 0.0)");
         }
 
         NS_LOG_INFO("Configured UEs with Constant Position Mobility Model.");
@@ -701,6 +707,8 @@ CreateRemoteHost(Ptr<PointToPointEpcHelper> epcHelper,
     // Enable PCAP tracing
     p2p.EnablePcap("pgw-p2p", devices.Get(0), true);
     p2p.EnablePcap("remote-host-p2p", devices.Get(1), true);
+
+    NS_LOG_INFO("Remote Host IP Address: " << interfaces.GetAddress(1));
 
     return interfaces.GetAddress(1); // Remote Host IP
 }
@@ -757,7 +765,9 @@ InstallVoipApplications(NodeContainer& ueNodes,
 Ptr<FlowMonitor>
 SetupFlowMonitor(FlowMonitorHelper& flowHelper)
 {
-    return flowHelper.InstallAll();
+    Ptr<FlowMonitor> flowMonitor = flowHelper.InstallAll();
+    NS_LOG_INFO("FlowMonitor installed.");
+    return flowMonitor;
 }
 
 /**
@@ -771,6 +781,7 @@ EnableLteTraces(Ptr<LteHelper> lteHelper)
     lteHelper->EnableMacTraces();
     lteHelper->EnableRlcTraces();
     lteHelper->EnablePdcpTraces();
+    NS_LOG_INFO("Enabled LTE Traces.");
 }
 
 /**
@@ -850,7 +861,7 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
 
             if (deltaPackets > 0)
             {
-                double avgFlowLatencyMs = (deltaDelaySum.GetSeconds() / deltaPackets) * 1000.0;
+                double avgFlowLatencyMs = (deltaDelaySum.GetSeconds() / (double)deltaPackets) * 1000.0;
                 totalLatencySum += (avgFlowLatencyMs * deltaPackets);
                 totalRxPackets += deltaPackets;
             }
@@ -904,6 +915,16 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
         oss << ", UE" << i << " Thr: " << ueThroughputKbps[i] << " Kbps";
     }
     NS_LOG_INFO(oss.str());
+
+    // Additional Debugging: Log per-UE Packet Loss and Jitter
+    std::ostringstream oss_detail;
+    oss_detail << "Time: " << g_currentTime << "s, ";
+    for (uint32_t i = 0; i < params.numUe; i++)
+    {
+        oss_detail << "UE" << i << " PL: " << uePacketLossRate[i] << "%, "
+                   << "Jitter: " << ueJitterMs[i] << " ms; ";
+    }
+    NS_LOG_DEBUG(oss_detail.str());
 
     // Schedule next statistics update
     if (g_currentTime + params.statsInterval <= params.simTime)
@@ -1058,6 +1079,12 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
     // Write Gnuplot Script for Throughput
     {
         std::ofstream fileT("ue-throughput-time-plot.plt");
+        if (!fileT.is_open())
+        {
+            NS_LOG_ERROR("Failed to open ue-throughput-time-plot.plt for writing.");
+            return;
+        }
+
         fileT << "set terminal png size 800,600\n";
         fileT << "set output 'ue-throughput-time-plot.png'\n";
         fileT << "set title 'Per-UE Throughput Over Time'\n";
@@ -1065,10 +1092,11 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
         fileT << "set ylabel 'Throughput (Kbps)'\n";
         fileT << "set key left top\n";
         fileT << "plot ";
+
         for (uint32_t ueIndex = 0; ueIndex < params.numUe; ueIndex++)
         {
             fileT << "'-' with linespoints title 'UE-" << ueIndex << "'";
-            if (ueIndex != static_cast<uint32_t>(params.numUe) - 1)
+            if (ueIndex != params.numUe - 1)
                 fileT << ", ";
         }
         fileT << "\n";
@@ -1109,6 +1137,12 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
     // Write Gnuplot Script for Latency
     {
         std::ofstream fileL("latency-time-plot.plt");
+        if (!fileL.is_open())
+        {
+            NS_LOG_ERROR("Failed to open latency-time-plot.plt for writing.");
+            return;
+        }
+
         fileL << "set terminal png size 800,600\n";
         fileL << "set output 'latency-time-plot.png'\n";
         fileL << "set title 'Aggregate Latency Over Time'\n";
@@ -1141,13 +1175,20 @@ AnalyzeData(FlowMonitorHelper& flowHelper,
 
     for (size_t i = 0; i < g_timePlot.size(); ++i)
     {
-        dsAvgThroughput.Add(g_timePlot[i], g_avgThroughputPlot[i]);
+        double avgThr = (i < g_avgThroughputPlot.size()) ? g_avgThroughputPlot[i] : 0.0;
+        dsAvgThroughput.Add(g_timePlot[i], avgThr);
     }
     plotAvgThroughput.AddDataset(dsAvgThroughput);
 
     // Write Gnuplot Script for Average Throughput
     {
         std::ofstream fileAvg("avg-throughput-time-plot.plt");
+        if (!fileAvg.is_open())
+        {
+            NS_LOG_ERROR("Failed to open avg-throughput-time-plot.plt for writing.");
+            return;
+        }
+
         fileAvg << "set terminal png size 800,600\n";
         fileAvg << "set output 'avg-throughput-time-plot.png'\n";
         fileAvg << "set title 'Average Throughput Over Time'\n";
