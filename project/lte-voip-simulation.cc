@@ -56,20 +56,20 @@ NS_LOG_COMPONENT_DEFINE("VoipLteSimulation");
 struct SimulationParameters
 {
     // Network Configuration
-    uint16_t numEnb = 2;     ///< Number of eNodeBs
-    uint16_t numUe = 5;      ///< Number of UEs
-    double simTime = 20.0;   ///< Simulation time in seconds
-    double areaSize = 200.0; ///< Size of the simulation area (square in meters)
+    uint16_t numEnb = 2;         ///< Number of eNodeBs
+    uint16_t numUe = 5;          ///< Number of UEs
+    double simTime = 20.0;       ///< Simulation time in seconds
+    double areaSize = 500.0; ///< Size of the simulation area (square in meters)
 
     // Path Loss Model Parameters
-    double distance0 = 30.0;  ///< First distance threshold in meters
-    double distance1 = 50.0; ///< Second distance threshold in meters
+    double distance0 = 50.0;  ///< First distance threshold in meters
+    double distance1 = 100.0; ///< Second distance threshold in meters
     double exponent0 = 1.7;   ///< Path loss exponent before distance0
     double exponent1 = 2.5;   ///< Path loss exponent between distance0 and distance1
     double exponent2 = 3.2;   ///< Path loss exponent beyond distance1
 
     double static constexpr HANDOVER_HYSTERESIS = 3;
-    double static constexpr HANDOVER_TimeToTrigger = 120; // ms
+    double static constexpr HANDOVER_TimeToTrigger = 256; // ms
 
     // Animation and Monitoring
     bool enableNetAnim = true;  ///< Enable NetAnim output
@@ -80,10 +80,10 @@ struct SimulationParameters
      */
     enum MobilityMode
     {
-        RANDOM_WAYPOINT = 0,          ///< Random Waypoint Mobility Model
-        CONSTANT_UNDER_DISTANCE0 = 1, ///< Constant Position within Distance0
-        CONSTANT_UNDER_DISTANCE1 = 2, ///< Constant Position within Distance1
-        CONSTANT_ABOVE_DISTANCE1 = 3  ///< Constant Position above Distance1
+        RANDOM_WAYPOINT = 0,                   ///< Random Waypoint Mobility Model
+        CONSTANT_UNDER_DISTANCE0 = 1,          ///< Constant Position within Distance0
+        CONSTANT_UNDER_DISTANCE1 = 2,          ///< Constant Position within Distance1
+        CONSTANT_ABOVE_DISTANCE1 = 3           ///< Constant Position above Distance1
     } mobilityMode = RANDOM_WAYPOINT; ///< Selected Mobility Mode
 
     /**
@@ -93,9 +93,9 @@ struct SimulationParameters
     {
         // Uncomment and configure other codecs as needed
 
-         codec.name = "G.711";
-         codec.bitrate = 64.0;  // kbps
-         codec.packetSize = 80; // bytes
+        codec.name = "G.711";
+        codec.bitrate = 64.0;  // kbps
+        codec.packetSize = 80; // bytes
 
         // // G.722.2
         // codec.name = "G.722.2";
@@ -245,9 +245,9 @@ main(int argc, char* argv[])
 
     // Create nodes
     NodeContainer enbNodes, ueNodes, remoteHostContainer;
-    enbNodes.Create(params.numEnb);
-    ueNodes.Create(params.numUe);
-    remoteHostContainer.Create(1); // Remote Host
+    enbNodes.Create(params.numEnb); // eNB nodes
+    ueNodes.Create(params.numUe);   // UE nodes
+    remoteHostContainer.Create(1);  // Remote Host
 
     // LTE and EPC Helpers
     Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
@@ -503,9 +503,8 @@ ConfigureLogging()
 /**
  * @brief Configures the mobility model for eNodeBs, placing them strategically based on the number
  *        of eNodeBs.
- *        - If 4 eNodeBs: Position them at four corners of the simulation area.
- *        - If 2 eNodeBs: Align them centrally along the Y-axis, maintaining X-axis positions from
- *          the 4 eNodeB setup.
+ *        - If 4 eNodeBs: Position them at 1/4 offset from the center in cardinal directions.
+ *        - If 2 eNodeBs: Align them centrally along the Y-axis at 1/4 and 3/4 of the X-axis.
  * @param enbNodes Container of eNodeB nodes.
  * @param areaSize Size of the simulation area.
  */
@@ -517,15 +516,15 @@ ConfigureEnbMobility(NodeContainer& enbNodes, double areaSize)
 
     if (enbNodes.GetN() == 4)
     {
-        // Four eNodeBs: Default positioning (corners)
-        posAlloc->Add(Vector(areaSize / 4, areaSize / 4, 30.0));         // Bottom-left
-        posAlloc->Add(Vector(areaSize / 4, 3 * areaSize / 4, 30.0));     // Top-left
-        posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 4, 30.0));     // Bottom-right
-        posAlloc->Add(Vector(3 * areaSize / 4, 3 * areaSize / 4, 30.0)); // Top-right
+        // Four eNodeBs: Positioned 1/4 from the center in cardinal directions
+        posAlloc->Add(Vector(areaSize / 2 - areaSize / 4, areaSize / 2, 30.0)); // Left
+        posAlloc->Add(Vector(areaSize / 2 + areaSize / 4, areaSize / 2, 30.0)); // Right
+        posAlloc->Add(Vector(areaSize / 2, areaSize / 2 - areaSize / 4, 30.0)); // Bottom
+        posAlloc->Add(Vector(areaSize / 2, areaSize / 2 + areaSize / 4, 30.0)); // Top
     }
     else if (enbNodes.GetN() == 2)
     {
-        // Two eNodeBs: Centered along the Y-axis
+        // Two eNodeBs: Positioned at (areaSize/4, areaSize/2) and (3*areaSize/4, areaSize/2)
         posAlloc->Add(Vector(areaSize / 4, areaSize / 2, 30.0));     // Center-left
         posAlloc->Add(Vector(3 * areaSize / 4, areaSize / 2, 30.0)); // Center-right
     }
@@ -587,7 +586,7 @@ ConfigureUeMobility(NodeContainer& ueNodes,
     case SimulationParameters::CONSTANT_UNDER_DISTANCE0:
     case SimulationParameters::CONSTANT_UNDER_DISTANCE1:
     case SimulationParameters::CONSTANT_ABOVE_DISTANCE1: {
-        // Constant Position Mobility Model with placement based on distance
+        // Constant Position Mobility Model with random placement based on distance
         MobilityHelper ueMobility;
         ueMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
         ueMobility.Install(ueNodes);
@@ -613,7 +612,18 @@ ConfigureUeMobility(NodeContainer& ueNodes,
         else if (mobilityMode == SimulationParameters::CONSTANT_ABOVE_DISTANCE1)
         {
             minDist = params.distance1;
-            maxDist = params.areaSize / 2.0; // Assuming maximum possible distance
+            maxDist = params.areaSize / 2.0; // Assuming maximum possible distance from center
+        }
+
+        // Set distance distribution based on mobility mode
+        if (mobilityMode == SimulationParameters::CONSTANT_ABOVE_DISTANCE1)
+        {
+            distanceDist =
+                std::uniform_real_distribution<double>(params.distance1, params.areaSize / 2.0);
+        }
+        else
+        {
+            distanceDist = std::uniform_real_distribution<double>(minDist, maxDist);
         }
 
         for (uint32_t i = 0; i < ueNodes.GetN(); ++i)
@@ -626,48 +636,21 @@ ConfigureUeMobility(NodeContainer& ueNodes,
                 continue;
             }
 
-            // Find the closest eNodeB
-            double minDistance = std::numeric_limits<double>::max();
-            uint32_t closestEnb = 0;
-            Vector uePos = ueMob->GetPosition();
-
-            for (uint32_t j = 0; j < enbNodes.GetN(); ++j)
-            {
-                Ptr<MobilityModel> enbMob = enbNodes.Get(j)->GetObject<MobilityModel>();
-                Vector enbPos = enbMob->GetPosition();
-                double dist = CalculateDistance(uePos, enbPos);
-                if (dist < minDistance)
-                {
-                    minDistance = dist;
-                    closestEnb = j;
-                }
-            }
-
-            Ptr<MobilityModel> enbMob = enbNodes.Get(closestEnb)->GetObject<MobilityModel>();
-            Vector enbPos = enbMob->GetPosition();
-
-            // Determine distance based on mobility mode
-            if (mobilityMode == SimulationParameters::CONSTANT_ABOVE_DISTANCE1)
-            {
-                distanceDist =
-                    std::uniform_real_distribution<double>(params.distance1, params.areaSize / 2.0);
-            }
-            else
-            {
-                distanceDist = std::uniform_real_distribution<double>(minDist, maxDist);
-            }
-
+            // Generate random distance and angle
             double distance = distanceDist(generator);
             double angle = angleDist(generator);
 
-            // Calculate UE position relative to eNodeB
-            double ueX = enbPos.x + distance * cos(angle);
-            double ueY = enbPos.y + distance * sin(angle);
+            // Calculate UE position relative to the center of the simulation area
+            double centerX = params.areaSize / 2.0;
+            double centerY = params.areaSize / 2.0;
+            double ueX = centerX + distance * cos(angle);
+            double ueY = centerY + distance * sin(angle);
 
             // Ensure UE is within the simulation area
             ueX = std::max(0.0, std::min(ueX, params.areaSize));
             ueY = std::max(0.0, std::min(ueY, params.areaSize));
 
+            // Set the calculated position
             ueMob->SetPosition(Vector(ueX, ueY, 0.0));
 
             NS_LOG_INFO("UE " << i << " positioned at (" << ueX << ", " << ueY << ", 0.0)");
@@ -861,7 +844,8 @@ PeriodicStatsUpdate(Ptr<FlowMonitor> flowMonitor,
 
             if (deltaPackets > 0)
             {
-                double avgFlowLatencyMs = (deltaDelaySum.GetSeconds() / (double)deltaPackets) * 1000.0;
+                double avgFlowLatencyMs =
+                    (deltaDelaySum.GetSeconds() / (double)deltaPackets) * 1000.0;
                 totalLatencySum += (avgFlowLatencyMs * deltaPackets);
                 totalRxPackets += deltaPackets;
             }
