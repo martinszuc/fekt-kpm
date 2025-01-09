@@ -56,10 +56,10 @@ NS_LOG_COMPONENT_DEFINE("VoipLteSimulation");
 struct SimulationParameters
 {
     // Network Configuration
-    uint16_t numEnb = 2;         ///< Number of eNodeBs
-    uint16_t numUe = 5;          ///< Number of UEs
-    double simTime = 20.0;       ///< Simulation time in seconds
-    double areaSize = 500.0; ///< Size of the simulation area (square in meters)
+    uint16_t numEnb = 2;     ///< Number of eNodeBs
+    uint16_t numUe = 5;     ///< Number of UEs
+    double simTime = 20.0;   ///< Simulation time in seconds
+    double areaSize = 200.0; ///< Size of the simulation area (square in meters)
 
     // Path Loss Model Parameters
     double distance0 = 50.0;  ///< First distance threshold in meters
@@ -68,8 +68,25 @@ struct SimulationParameters
     double exponent1 = 2.5;   ///< Path loss exponent between distance0 and distance1
     double exponent2 = 3.2;   ///< Path loss exponent beyond distance1
 
-    double static constexpr HANDOVER_HYSTERESIS = 3;
-    double static constexpr HANDOVER_TimeToTrigger = 256; // ms
+    static constexpr double HANDOVER_HYSTERESIS = 3.0;      ///< Handover hysteresis in dB
+    static constexpr double HANDOVER_TimeToTrigger = 256.0; ///< Handover Time-To-Trigger in ms
+
+    // LTE Bandwidth Configuration
+    uint16_t lteBandwidth = 1; ///< LTE Bandwidth in MHz
+
+    /**
+     * @brief LTE Bandwidth options (MHz) mapped to RBs.
+     *
+     * | Bandwidth (MHz) | Downlink RBs | Uplink RBs |
+     * |-----------------|--------------|------------|
+     * | 1.4   // 1      | 6            | 6          |
+     * | 3               | 15           | 15         |
+     * | 5               | 25           | 25         |
+     * | 10              | 50           | 50         |
+     * | 15              | 75           | 75         |
+     * | 20              | 100          | 100        |
+     */
+    std::map<uint16_t, std::pair<uint16_t, uint16_t>> lteBandwidthMap;
 
     // Animation and Monitoring
     bool enableNetAnim = true;  ///< Enable NetAnim output
@@ -80,19 +97,26 @@ struct SimulationParameters
      */
     enum MobilityMode
     {
-        RANDOM_WAYPOINT = 0,                   ///< Random Waypoint Mobility Model
-        CONSTANT_UNDER_DISTANCE0 = 1,          ///< Constant Position within Distance0
-        CONSTANT_UNDER_DISTANCE1 = 2,          ///< Constant Position within Distance1
-        CONSTANT_ABOVE_DISTANCE1 = 3           ///< Constant Position above Distance1
+        RANDOM_WAYPOINT = 0,          ///< Random Waypoint Mobility Model
+        CONSTANT_UNDER_DISTANCE0 = 1, ///< Constant Position within Distance0
+        CONSTANT_UNDER_DISTANCE1 = 2, ///< Constant Position within Distance1
+        CONSTANT_ABOVE_DISTANCE1 = 3  ///< Constant Position above Distance1
     } mobilityMode = RANDOM_WAYPOINT; ///< Selected Mobility Mode
 
     /**
-     * @brief Initializes default VoIP codec parameters.
+     * @brief Initializes default VoIP codec parameters and LTE Bandwidth Map.
      */
     SimulationParameters()
     {
-        // Uncomment and configure other codecs as needed
+        // Initialize LTE Bandwidth Map
+        lteBandwidthMap = {{1, {6, 6}},
+                           {3, {15, 15}},
+                           {5, {25, 25}},
+                           {10, {50, 50}},
+                           {15, {75, 75}},
+                           {20, {100, 100}}};
 
+        // Initialize VoIP codec (default: G.711)
         codec.name = "G.711";
         codec.bitrate = 64.0;  // kbps
         codec.packetSize = 80; // bytes
@@ -262,6 +286,36 @@ main(int argc, char* argv[])
     lteHelper->SetPathlossModelAttribute("Exponent0", DoubleValue(params.exponent0));
     lteHelper->SetPathlossModelAttribute("Exponent1", DoubleValue(params.exponent1));
     lteHelper->SetPathlossModelAttribute("Exponent2", DoubleValue(params.exponent2));
+
+    // LTE Bandwidth Configuration using Bandwidth Map
+    uint16_t dlBandwidth; // Downlink Bandwidth in RBs
+    uint16_t ulBandwidth; // Uplink Bandwidth in RBs
+
+    auto it = params.lteBandwidthMap.find(params.lteBandwidth);
+    if (it != params.lteBandwidthMap.end())
+    {
+        dlBandwidth = it->second.first;
+        ulBandwidth = it->second.second;
+    }
+    else
+    {
+        NS_LOG_WARN("Unsupported LTE bandwidth: " << params.lteBandwidth
+                                                  << " MHz. Defaulting to 20 MHz.");
+        auto defaultIt = params.lteBandwidthMap.find(20);
+        if (defaultIt != params.lteBandwidthMap.end())
+        {
+            dlBandwidth = defaultIt->second.first;
+            ulBandwidth = defaultIt->second.second;
+        }
+        else
+        {
+            NS_LOG_ERROR("Default LTE bandwidth not found in bandwidth map.");
+            return 1;
+        }
+    }
+
+    lteHelper->SetEnbDeviceAttribute("DlBandwidth", UintegerValue(dlBandwidth));
+    lteHelper->SetEnbDeviceAttribute("UlBandwidth", UintegerValue(ulBandwidth));
 
     // LTE Scheduler Configuration
     lteHelper->SetSchedulerType("ns3::RrFfMacScheduler");
@@ -606,8 +660,8 @@ ConfigureUeMobility(NodeContainer& ueNodes,
         }
         else if (mobilityMode == SimulationParameters::CONSTANT_UNDER_DISTANCE1)
         {
-            minDist = (params.distance1 / 2.0) - 10;
-            maxDist = (params.distance1 / 2.0) + 10;
+            minDist = (params.distance1 / 2.0) - 10.0;
+            maxDist = (params.distance1 / 2.0) + 10.0;
         }
         else if (mobilityMode == SimulationParameters::CONSTANT_ABOVE_DISTANCE1)
         {
